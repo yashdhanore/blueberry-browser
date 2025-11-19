@@ -11,7 +11,7 @@ dotenv.config({ path: join(__dirname, "../../.env") });
 const MODEL_NAME = "gemini-2.5-computer-use-preview-10-2025";
 const SCREEN_WIDTH = 1440;
 const SCREEN_HEIGHT = 900;
-const MAX_TURNS = 10;
+const MAX_TURNS = 20;
 
 export class ComputerUseClient {
   private readonly webContents: WebContents;

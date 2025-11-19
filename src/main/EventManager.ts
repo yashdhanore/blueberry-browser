@@ -173,6 +173,17 @@ export class EventManager {
     ipcMain.handle("sidebar-get-messages", () => {
       return this.mainWindow.sidebar.client.getMessages();
     });
+
+    ipcMain.handle("computer-use-execute", async (_, request) => {
+      await this.mainWindow.sidebar.computerUse.executeTask(request);
+    });
+
+    // Computer Use - stop task
+    ipcMain.handle("computer-use-stop", () => {
+      this.mainWindow.sidebar.computerUse.stop();
+
+      return true;
+    });
   }
 
   private handlePageContentEvents(): void {
