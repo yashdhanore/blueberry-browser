@@ -1,6 +1,6 @@
 import { contextBridge } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
-import { ComputerUseRequest } from "../main/ComputerUseTypes";
+import { ComputerUseRequest } from "../main/agent/ComputerUseTypes";
 
 interface ChatRequest {
   message: string;

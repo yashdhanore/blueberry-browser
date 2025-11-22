@@ -4,7 +4,7 @@ import * as dotenv from "dotenv";
 import { join } from "path";
 import type { Window } from "./Window";
 import type { Tab } from "./Tab";
-import { ActionResult, ComputerUseRequest } from "./ComputerUseTypes";
+import { ActionResult, ComputerUseRequest } from "./agent/ComputerUseTypes";
 import { ComputerUseActions } from "./ComputerUseActions";
 dotenv.config({ path: join(__dirname, "../../.env") });
 

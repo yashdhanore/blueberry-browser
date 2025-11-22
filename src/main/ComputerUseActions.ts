@@ -1,5 +1,5 @@
 import { Tab } from "./Tab";
-import { ActionResult } from "./ComputerUseTypes";
+import { ActionResult } from "./agent/ComputerUseTypes";
 
 export class ComputerUseActions {
   private screenWidth: number;
