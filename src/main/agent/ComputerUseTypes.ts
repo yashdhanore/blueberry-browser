@@ -142,7 +142,7 @@ export interface AgentAction {
 /**
  * Part of a message (text or image)
  */
-export interface GeminiMessagePart {
+export interface AgentMessagePart {
   text?: string;
   inline_data?: {
     mime_type: string;
@@ -158,9 +158,9 @@ export interface GeminiMessagePart {
 /**
  * A message
  */
-export interface GeminiMessage {
+export interface AgentMessage {
   role: "user" | "model";
-  parts: GeminiMessagePart[];
+  parts: AgentMessagePart[];
 }
 
 /**
@@ -176,7 +176,7 @@ export interface TaskContext {
   endTime?: number;
   error?: string;
   finalResponse?: string;
-  conversationHistory: GeminiMessage[];
+  conversationHistory: AgentMessage[];
 }
 
 /**
