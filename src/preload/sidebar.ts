@@ -1,6 +1,5 @@
 import { contextBridge } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
-import { ComputerUseRequest } from "../main/agent/ComputerUseTypes";
 
 interface ChatRequest {
   message: string;
@@ -18,19 +17,17 @@ interface ChatResponse {
   isComplete: boolean;
 }
 
-interface ComputerUseStatus {
-  messageId: string;
-  status: string;
-}
-
-interface ComputerUseComplete {
-  messageId: string;
-  result: string;
-}
-
-interface ComputerUseError {
-  messageId: string;
-  error: string;
+interface AgentUpdate {
+  type:
+    | "start"
+    | "turn"
+    | "action"
+    | "actionComplete"
+    | "reasoning"
+    | "complete"
+    | "error"
+    | "cancelled";
+  data: any;
 }
 
 // Sidebar specific APIs
@@ -69,33 +66,25 @@ const sidebarAPI = {
   // Tab information
   getActiveTabInfo: () => electronAPI.ipcRenderer.invoke("get-active-tab-info"),
 
-  executeComputerUse: (request: ComputerUseRequest) =>
-    electronAPI.ipcRenderer.invoke("computer-use-execute", request),
+  // Agent control
+  startAgent: (goal: string) =>
+    electronAPI.ipcRenderer.invoke("agent-start", goal),
 
-  stopComputerUse: () => electronAPI.ipcRenderer.invoke("computer-use-stop"),
+  cancelAgent: () => electronAPI.ipcRenderer.invoke("agent-cancel"),
 
-  onComputerUseStatus: (callback: (data: ComputerUseStatus) => void) => {
-    electronAPI.ipcRenderer.on("computer-use-status", (_, data) =>
-      callback(data)
-    );
+  pauseAgent: () => electronAPI.ipcRenderer.invoke("agent-pause"),
+
+  resumeAgent: () => electronAPI.ipcRenderer.invoke("agent-resume"),
+
+  getAgentState: () => electronAPI.ipcRenderer.invoke("agent-get-state"),
+
+  // Agent event listeners
+  onAgentUpdate: (callback: (data: AgentUpdate) => void) => {
+    electronAPI.ipcRenderer.on("agent-update", (_, data) => callback(data));
   },
 
-  onComputerUseComplete: (callback: (data: ComputerUseComplete) => void) => {
-    electronAPI.ipcRenderer.on("computer-use-complete", (_, data) =>
-      callback(data)
-    );
-  },
-
-  onComputerUseError: (callback: (data: ComputerUseError) => void) => {
-    electronAPI.ipcRenderer.on("computer-use-error", (_, data) =>
-      callback(data)
-    );
-  },
-
-  removeComputerUseListeners: () => {
-    electronAPI.ipcRenderer.removeAllListeners("computer-use-status");
-    electronAPI.ipcRenderer.removeAllListeners("computer-use-complete");
-    electronAPI.ipcRenderer.removeAllListeners("computer-use-error");
+  removeAgentUpdateListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("agent-update");
   },
 };
 

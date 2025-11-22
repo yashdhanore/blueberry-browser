@@ -31,8 +31,6 @@ export class Window {
     // Set the window reference on the LLM client to avoid circular dependency
     this._sideBar.client.setWindow(this);
 
-    this._sideBar.computerUse.setWindow(this);
-
     // Create the first tab
     this.createTab();
 

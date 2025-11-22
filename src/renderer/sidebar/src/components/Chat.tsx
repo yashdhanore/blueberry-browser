@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { ArrowUp, Square, Sparkles, Plus, Bot } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Plus } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
@@ -154,9 +154,7 @@ const LoadingIndicator: React.FC = () => {
 const ChatInput: React.FC<{
     onSend: (message: string) => void
     disabled: boolean
-    isComputerUseMode: boolean
-    onToggleMode: () => void
-}> = ({ onSend, disabled, isComputerUseMode, onToggleMode }) => {
+}> = ({ onSend, disabled }) => {
     const [value, setValue] = useState('')
     const [isFocused, setIsFocused] = useState(false)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -206,8 +204,8 @@ const ChatInput: React.FC<{
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
                             onKeyDown={handleKeyDown}
-                            placeholder={isComputerUseMode ? "Describe a task for the agent..." : "Send a message..."}
-                            className="w-full resize-none outline-none bg-transparent
+                            placeholder="Send a message..."
+                            className="w-full resize-none outline-none bg-transparent 
                                      text-foreground placeholder:text-muted-foreground
                                      min-h-[24px] max-h-[200px]"
                             rows={1}
@@ -217,26 +215,9 @@ const ChatInput: React.FC<{
                 </div>
             </div>
 
-            {/* Controls */}
+            {/* Send Button */}
             <div className="w-full flex items-center gap-1.5 px-1 mt-2 mb-1">
-                {/* Computer Use Toggle */}
-                <button
-                    onClick={onToggleMode}
-                    disabled={disabled}
-                    title={isComputerUseMode ? "Switch to Chat mode" : "Switch to Computer Use mode"}
-                    className={cn(
-                        "size-9 rounded-full flex items-center justify-center",
-                        "transition-all duration-200",
-                        isComputerUseMode
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80",
-                        "disabled:opacity-50"
-                    )}
-                >
-                    <Bot className="size-5" />
-                </button>
                 <div className="flex-1" />
-                {/* Send Button */}
                 <button
                     onClick={handleSubmit}
                     disabled={disabled || !value.trim()}
@@ -284,54 +265,6 @@ const ConversationTurnComponent: React.FC<{
 export const Chat: React.FC = () => {
     const { messages, isLoading, sendMessage, clearChat } = useChat()
     const scrollRef = useAutoScroll(messages)
-    const [isComputerUseMode, setIsComputerUseMode] = useState(false)
-    const [computerUseStatus, setComputerUseStatus] = useState<string | null>(null)
-
-    // Computer Use event listeners
-    useEffect(() => {
-        const handleStatus = (data: { messageId: string; status: string }) => {
-            setComputerUseStatus(data.status)
-        }
-
-        const handleComplete = (data: { messageId: string; result: string }) => {
-            setComputerUseStatus(null)
-            // Add result as an assistant message
-            sendMessage(`Task completed: ${data.result}`)
-        }
-
-        const handleError = (data: { messageId: string; error: string }) => {
-            setComputerUseStatus(null)
-            // Add error as an assistant message
-            sendMessage(`Error: ${data.error}`)
-        }
-
-        window.sidebarAPI.onComputerUseStatus(handleStatus)
-        window.sidebarAPI.onComputerUseComplete(handleComplete)
-        window.sidebarAPI.onComputerUseError(handleError)
-
-        return () => {
-            window.sidebarAPI.removeComputerUseListeners()
-        }
-    }, [sendMessage])
-
-    const handleSendMessage = async (content: string) => {
-        if (isComputerUseMode) {
-            // Execute Computer Use task
-            const messageId = Date.now().toString()
-            setComputerUseStatus('Starting task...')
-            await window.sidebarAPI.executeComputerUse({
-                prompt: content,
-                messageId
-            })
-        } else {
-            // Regular chat message
-            await sendMessage(content)
-        }
-    }
-
-    const handleToggleMode = () => {
-        setIsComputerUseMode(!isComputerUseMode)
-    }
 
     // Group messages into conversation turns
     const conversationTurns: ConversationTurn[] = []
@@ -358,7 +291,7 @@ export const Chat: React.FC = () => {
         <div className="flex flex-col h-full bg-background">
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto">
-                <div className="h-8 max-w-3xl mx-auto px-4 flex items-center justify-between">
+                <div className="h-8 max-w-3xl mx-auto px-4">
                     {/* New Chat Button - Floating */}
                     {messages.length > 0 && (
                         <Button
@@ -369,14 +302,6 @@ export const Chat: React.FC = () => {
                             <Plus className="size-4" />
                             New Chat
                         </Button>
-                    )}
-
-                    {/* Computer Use Status */}
-                    {computerUseStatus && (
-                        <div className="text-sm text-muted-foreground flex items-center gap-2">
-                            <Bot className="size-4 animate-pulse" />
-                            {computerUseStatus}
-                        </div>
                     )}
                 </div>
 
@@ -416,12 +341,7 @@ export const Chat: React.FC = () => {
 
             {/* Input Area */}
             <div className="p-4">
-                <ChatInput
-                    onSend={handleSendMessage}
-                    disabled={isLoading || !!computerUseStatus}
-                    isComputerUseMode={isComputerUseMode}
-                    onToggleMode={handleToggleMode}
-                />
+                <ChatInput onSend={sendMessage} disabled={isLoading} />
             </div>
         </div>
     )

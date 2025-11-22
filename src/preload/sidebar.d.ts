@@ -16,31 +16,40 @@ interface ChatResponse {
   isComplete: boolean;
 }
 
-interface ComputerUseRequest {
-  prompt: string;
-  messageId: string;
-}
-
-interface ComputerUseStatus {
-  messageId: string;
-  status: string;
-}
-
-interface ComputerUseComplete {
-  messageId: string;
-  result: string;
-}
-
-interface ComputerUseError {
-  messageId: string;
-  error: string;
-}
-
 interface TabInfo {
   id: string;
   title: string;
   url: string;
   isActive: boolean;
+}
+
+interface AgentUpdate {
+  type:
+    | "start"
+    | "turn"
+    | "action"
+    | "actionComplete"
+    | "reasoning"
+    | "complete"
+    | "error"
+    | "cancelled";
+  data: any;
+}
+
+interface AgentState {
+  isRunning: boolean;
+  isPaused: boolean;
+  goal: string | null;
+  currentTurn: number;
+  maxTurns: number;
+  actions: Array<{
+    id: string;
+    type: string;
+    args: any;
+    status: "pending" | "completed" | "failed";
+    timestamp: number;
+  }>;
+  error: string | null;
 }
 
 interface SidebarAPI {
@@ -61,15 +70,14 @@ interface SidebarAPI {
   // Tab information
   getActiveTabInfo: () => Promise<TabInfo | null>;
 
-  // Computer Use functionality
-  executeComputerUse: (request: ComputerUseRequest) => Promise<void>;
-  stopComputerUse: () => Promise<void>;
-  onComputerUseStatus: (callback: (data: ComputerUseStatus) => void) => void;
-  onComputerUseComplete: (
-    callback: (data: ComputerUseComplete) => void
-  ) => void;
-  onComputerUseError: (callback: (data: ComputerUseError) => void) => void;
-  removeComputerUseListeners: () => void;
+  // Agent
+  startAgent: (goal: string) => Promise<{ success: boolean; error?: string }>;
+  cancelAgent: () => Promise<void>;
+  pauseAgent: () => Promise<void>;
+  resumeAgent: () => Promise<void>;
+  getAgentState: () => Promise<AgentState | null>;
+  onAgentUpdate: (callback: (data: AgentUpdate) => void) => void;
+  removeAgentUpdateListener: () => void;
 }
 
 declare global {
