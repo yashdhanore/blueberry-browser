@@ -243,7 +243,8 @@ export class AgentOrchestrator extends EventEmitter {
     }
 
     if (response.isComplete) {
-      this.context.completeTask(response.finalResponse);
+      const ctx = this.context.getContext() as any;
+      ctx.finalResponse = response.finalResponse;
 
       if (this.overlay) {
         await this.overlay.update({
