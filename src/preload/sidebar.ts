@@ -17,6 +17,19 @@ interface ChatResponse {
   isComplete: boolean;
 }
 
+interface AgentUpdate {
+  type:
+    | "start"
+    | "turn"
+    | "action"
+    | "actionComplete"
+    | "reasoning"
+    | "complete"
+    | "error"
+    | "cancelled";
+  data: any;
+}
+
 // Sidebar specific APIs
 const sidebarAPI = {
   // Chat functionality
@@ -52,6 +65,27 @@ const sidebarAPI = {
 
   // Tab information
   getActiveTabInfo: () => electronAPI.ipcRenderer.invoke("get-active-tab-info"),
+
+  // Agent control
+  startAgent: (goal: string) =>
+    electronAPI.ipcRenderer.invoke("agent-start", goal),
+
+  cancelAgent: () => electronAPI.ipcRenderer.invoke("agent-cancel"),
+
+  pauseAgent: () => electronAPI.ipcRenderer.invoke("agent-pause"),
+
+  resumeAgent: () => electronAPI.ipcRenderer.invoke("agent-resume"),
+
+  getAgentState: () => electronAPI.ipcRenderer.invoke("agent-get-state"),
+
+  // Agent event listeners
+  onAgentUpdate: (callback: (data: AgentUpdate) => void) => {
+    electronAPI.ipcRenderer.on("agent-update", (_, data) => callback(data));
+  },
+
+  removeAgentUpdateListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("agent-update");
+  },
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

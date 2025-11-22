@@ -1,8 +1,10 @@
 import { ipcMain, WebContents } from "electron";
 import type { Window } from "./Window";
+import { AgentOrchestrator } from "./agent/AgentOrchestrator";
 
 export class EventManager {
   private mainWindow: Window;
+  private orchestrator: AgentOrchestrator | null = null;
 
   constructor(mainWindow: Window) {
     this.mainWindow = mainWindow;
@@ -24,6 +26,9 @@ export class EventManager {
 
     // Debug events
     this.handleDebugEvents();
+
+    // Agent events
+    this.handleAgentEvents();
   }
 
   private handleTabEvents(): void {
@@ -141,8 +146,8 @@ export class EventManager {
           id: activeTab.id,
           url: activeTab.url,
           title: activeTab.title,
-          canGoBack: activeTab.webContents.canGoBack(),
-          canGoForward: activeTab.webContents.canGoForward(),
+          canGoBack: activeTab.webContents.navigationHistory.canGoBack(),
+          canGoForward: activeTab.webContents.navigationHistory.canGoForward(),
         };
       }
       return null;
@@ -221,6 +226,96 @@ export class EventManager {
   private handleDebugEvents(): void {
     // Ping test
     ipcMain.on("ping", () => console.log("pong"));
+  }
+
+  /**
+   * Agent IPC handlers
+   */
+  private handleAgentEvents(): void {
+    ipcMain.handle("agent-start", async (_, goal: string) => {
+      console.log("agent-start received:", goal);
+
+      if (this.orchestrator && this.orchestrator.getContext().isRunning()) {
+        return { success: false, error: "Agent already running" };
+      }
+
+      this.orchestrator = new AgentOrchestrator(this.mainWindow);
+      this.setupOrchestratorListeners();
+
+      this.orchestrator.startTask(goal).catch((err) => {
+        console.error("Agent error:", err);
+      });
+
+      return { success: true };
+    });
+
+    ipcMain.handle("agent-cancel", async () => {
+      console.log("agent-cancel received");
+      if (this.orchestrator) {
+        await this.orchestrator.cancelTask();
+        this.orchestrator = null;
+      }
+    });
+
+    ipcMain.handle("agent-pause", () => {
+      console.log("agent-pause received");
+      this.orchestrator?.pauseTask();
+    });
+
+    ipcMain.handle("agent-resume", () => {
+      console.log("agent-resume received");
+      this.orchestrator?.resumeTask();
+    });
+
+    ipcMain.handle("agent-get-state", () => {
+      if (!this.orchestrator) return null;
+
+      const context = this.orchestrator.getContext();
+      const ctx = context.getContext();
+
+      return {
+        isRunning: context.isRunning(),
+        isPaused: context.isPaused(),
+        goal: ctx.userGoal,
+        currentTurn: context.getCurrentTurn(),
+        maxTurns: context.getConfig().maxTurns,
+        actions: ctx.actions.map((a) => ({
+          id: a.id,
+          type: a.functionCall.name,
+          args: a.functionCall.args,
+          status: a.status,
+          timestamp: a.timestamp,
+        })),
+        error: ctx.error || null,
+      };
+    });
+  }
+
+  private setupOrchestratorListeners(): void {
+    if (!this.orchestrator) return;
+
+    const events = [
+      "start",
+      "turn",
+      "action",
+      "actionComplete",
+      "reasoning",
+      "complete",
+      "error",
+      "cancelled",
+      "paused",
+      "resumed",
+    ];
+
+    events.forEach((event) => {
+      this.orchestrator!.on(event, (data) => {
+        console.log(`[Agent] ${event}:`, JSON.stringify(data).slice(0, 100));
+        this.mainWindow.sidebar.view.webContents.send("agent-update", {
+          type: event,
+          data,
+        });
+      });
+    });
   }
 
   private broadcastDarkMode(sender: WebContents, isDarkMode: boolean): void {

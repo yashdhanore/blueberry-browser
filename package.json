@@ -25,6 +25,7 @@
     "@ai-sdk/openai": "^2.0.30",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@google/genai": "^1.30.0",
     "@radix-ui/react-slot": "^1.2.3",
     "ai": "^5.0.44",
     "class-variance-authority": "^0.7.1",
