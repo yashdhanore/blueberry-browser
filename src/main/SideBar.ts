@@ -2,7 +2,7 @@ import { is } from "@electron-toolkit/utils";
 import { BaseWindow, WebContentsView } from "electron";
 import { join } from "path";
 import { LLMClient } from "./LLMClient";
-import { ComputerUseClient } from "./ComputerUseClient";
+import { ComputerUseClient } from "./agent/ComputerUseClient";
 
 export class SideBar {
   private webContentsView: WebContentsView;

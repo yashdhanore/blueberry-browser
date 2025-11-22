@@ -290,3 +290,53 @@ export enum AgentErrorCode {
   INVALID_STATE = "INVALID_STATE",
   USER_CANCELLED = "USER_CANCELLED",
 }
+
+export interface PlanNextActionParams {
+  screenshot: Buffer;
+  currentUrl: string;
+  userGoal: string;
+  previousActions?: AgentAction[];
+  isInitial: boolean;
+}
+
+/**
+ * Response from planning the next action
+ */
+export interface PlanNextActionResponse {
+  reasoning: string;
+  functionCalls: GeminiFunctionCall[];
+  isComplete: boolean;
+  finalResponse?: string;
+}
+
+/**
+ * Parameters for sending function response
+ */
+export interface SendFunctionResponseParams {
+  functionName: string;
+  result: any;
+  newScreenshot: Buffer;
+  newUrl: string;
+  safetyAcknowledgement?: boolean;
+}
+
+export interface ToolResult {
+  success: boolean;
+  error?: string;
+  data?: any;
+}
+
+export interface TypeParams {
+  x: number;
+  y: number;
+  text: string;
+  pressEnter?: boolean;
+  clearFirst?: boolean;
+}
+
+export interface ScrollAtParams {
+  x: number;
+  y: number;
+  direction: "up" | "down" | "left" | "right";
+  magnitude?: number;
+}
