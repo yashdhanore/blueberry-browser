@@ -307,9 +307,13 @@ export class EventManager {
       "resumed",
     ];
 
+    const logEvents = new Set(["start", "complete", "error", "cancelled"]);
+
     events.forEach((event) => {
       this.orchestrator!.on(event, (data) => {
-        console.log(`[Agent] ${event}:`, JSON.stringify(data).slice(0, 100));
+        if (logEvents.has(event)) {
+          console.log(`[Agent] ${event}:`, JSON.stringify(data).slice(0, 100));
+        }
         this.mainWindow.sidebar.view.webContents.send("agent-update", {
           type: event,
           data,

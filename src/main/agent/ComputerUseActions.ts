@@ -1,6 +1,5 @@
 import { Window } from "../Window";
 import { Stagehand } from "@browserbasehq/stagehand";
-import { Tab } from "../Tab";
 import {
   COORDINATE_RANGE,
   ScrollAtParams,
@@ -20,6 +19,67 @@ export class ComputerUseActions {
     this.stagehand = stagehand;
   }
 
+  getStagehandPage() {
+    if (!this.stagehand) {
+      throw new Error("Stagehand not initialized");
+    }
+
+    const ctx = (this.stagehand as any).context;
+    if (!ctx) {
+      throw new Error("Stagehand context not available");
+    }
+
+    const pages = ctx.pages() as any[];
+    const activeTab = this.window.activeTab;
+
+    const isAuxiliaryUrl = (url: string | undefined | null) => {
+      if (!url) return true;
+      const lower = url.toLowerCase();
+      if (lower.startsWith("chrome://") || lower.startsWith("devtools://"))
+        return true;
+      if (lower.includes("localhost:5173/topbar")) return true;
+      if (lower.includes("localhost:5173/sidebar")) return true;
+      return false;
+    };
+
+    if (activeTab) {
+      const tabUrl = activeTab.url;
+      const matchByUrl = pages.find((p) => {
+        try {
+          return p.url() === tabUrl;
+        } catch {
+          return false;
+        }
+      });
+      if (matchByUrl) {
+        return matchByUrl;
+      }
+    }
+
+    const nonAuxPages = pages.filter((p) => {
+      try {
+        return !isAuxiliaryUrl(p.url());
+      } catch {
+        return false;
+      }
+    });
+
+    if (nonAuxPages.length > 0) {
+      const active = ctx.activePage?.();
+      if (active && nonAuxPages.includes(active)) {
+        return active;
+      }
+      return nonAuxPages[nonAuxPages.length - 1];
+    }
+
+    const active = ctx.activePage?.();
+    if (active && !isAuxiliaryUrl(active.url())) {
+      return active;
+    }
+
+    throw new Error("No suitable Stagehand page found for active tab");
+  }
+
   async denormalizeCoords(
     normalizedX: number,
     normalizedY: number
@@ -34,17 +94,18 @@ export class ComputerUseActions {
 
   async navigate(url: string): Promise<ToolResult> {
     try {
-      const tab = this.getActiveTab();
+      const page = this.getStagehandPage();
 
       let finalUrl = url;
       if (!url.startsWith("http://") && !url.startsWith("https://")) {
         finalUrl = "https://" + url;
       }
 
-      await tab.loadURL(finalUrl);
-      await this.waitForPageSettle();
+      await page.goto(finalUrl, {
+        waitUntil: "networkidle",
+      });
 
-      const currentUrl = await this.getCurrentUrl();
+      const currentUrl = page.url();
 
       return {
         success: true,
@@ -60,19 +121,13 @@ export class ComputerUseActions {
 
   async goBack(): Promise<ToolResult> {
     try {
-      const tab = this.getActiveTab();
+      const page = this.getStagehandPage();
 
-      if (!tab.webContents.navigationHistory.canGoBack()) {
-        return {
-          success: false,
-          error: "Cannot go back",
-        };
-      }
+      await page.goBack({
+        waitUntil: "networkidle",
+      });
 
-      tab.goBack();
-      await this.waitForPageSettle();
-
-      const currentUrl = await this.getCurrentUrl();
+      const currentUrl = page.url();
 
       return {
         success: true,
@@ -88,19 +143,13 @@ export class ComputerUseActions {
 
   async goForward(): Promise<ToolResult> {
     try {
-      const tab = this.getActiveTab();
+      const page = this.getStagehandPage();
 
-      if (!tab.webContents.navigationHistory.canGoForward()) {
-        return {
-          success: false,
-          error: "Cannot go forward",
-        };
-      }
+      await page.goForward({
+        waitUntil: "networkidle",
+      });
 
-      tab.goForward();
-      await this.waitForPageSettle();
-
-      const currentUrl = await this.getCurrentUrl();
+      const currentUrl = page.url();
 
       return {
         success: true,
@@ -117,23 +166,9 @@ export class ComputerUseActions {
   async clickAt(normalizedX: number, normalizedY: number): Promise<ToolResult> {
     try {
       const { x, y } = await this.denormalizeCoords(normalizedX, normalizedY);
-      const tab = this.getActiveTab();
+      const page = this.getStagehandPage();
 
-      tab.webContents.sendInputEvent({
-        type: "mouseDown",
-        x,
-        y,
-        button: "left",
-        clickCount: 1,
-      });
-
-      tab.webContents.sendInputEvent({
-        type: "mouseUp",
-        x,
-        y,
-        button: "left",
-        clickCount: 1,
-      });
+      await page.click(x, y);
 
       await this.waitForPageSettle();
 
@@ -154,25 +189,26 @@ export class ComputerUseActions {
   async typeTextAt(params: TypeParams): Promise<ToolResult> {
     try {
       const { x, y, text, pressEnter = false, clearFirst = true } = params;
+      const page = this.getStagehandPage();
 
-      const clickResult = await this.clickAt(x, y);
-      if (!clickResult.success) {
-        return clickResult;
-      }
-
+      // Click to focus
+      await page.click(x, y);
       await this.wait(0.1);
 
       if (clearFirst) {
-        await this.selectAll();
-        await this.pressKey("Backspace");
+        // Select all and delete
+        const modifier = process.platform === "darwin" ? "Meta" : "Control";
+        await page.keyPress(`${modifier}+A`);
+        await this.wait(0.1);
+        await page.keyPress("Backspace");
       }
 
-      const tab = this.getActiveTab();
-      tab.webContents.insertText(text);
+      // Type the text
+      await page.type(text);
 
       if (pressEnter) {
         await this.wait(0.1);
-        await this.pressKey("Return");
+        await page.keyPress("Enter");
       }
 
       await this.waitForPageSettle();
@@ -192,13 +228,24 @@ export class ComputerUseActions {
   async hoverAt(normalizedX: number, normalizedY: number): Promise<ToolResult> {
     try {
       const { x, y } = await this.denormalizeCoords(normalizedX, normalizedY);
-      const tab = this.getActiveTab();
+      const page = this.getStagehandPage();
 
-      tab.webContents.sendInputEvent({
-        type: "mouseMove",
-        x,
-        y,
-      });
+      // Stagehand doesn't have a direct hover method, but we can use evaluate
+      // to dispatch a mouseover event, or get element info at that location
+      await page.evaluate(
+        (coords) => {
+          const el = document.elementFromPoint(coords.x, coords.y);
+          if (el) {
+            const event = new MouseEvent("mouseover", {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+            });
+            el.dispatchEvent(event);
+          }
+        },
+        { x, y }
+      );
 
       await this.wait(0.2);
 
@@ -220,36 +267,39 @@ export class ComputerUseActions {
     direction: "up" | "down" | "left" | "right"
   ): Promise<ToolResult> {
     try {
-      const tab = this.getActiveTab();
+      const page = this.getStagehandPage();
 
-      let keyCode: string;
+      // Get viewport size for scroll calculation
+      const viewport = await this.getViewportSize();
+      const scrollAmount = Math.min(viewport.height, viewport.width) * 0.8;
+
+      let deltaX = 0;
+      let deltaY = 0;
+
       if (direction === "down") {
-        keyCode = "PageDown";
+        deltaY = scrollAmount;
       } else if (direction === "up") {
-        keyCode = "PageUp";
+        deltaY = -scrollAmount;
       } else if (direction === "right") {
-        keyCode = "Right";
+        deltaX = scrollAmount;
       } else {
-        keyCode = "Left";
+        deltaX = -scrollAmount;
       }
 
-      tab.webContents.sendInputEvent({
-        type: "keyDown",
-        keyCode: keyCode,
-      });
-
-      tab.webContents.sendInputEvent({
-        type: "keyUp",
-        keyCode: keyCode,
-      });
+      // Scroll from center of viewport
+      await page.scroll(
+        viewport.width / 2,
+        viewport.height / 2,
+        deltaX,
+        deltaY
+      );
 
       await this.wait(0.3);
 
       return {
         success: true,
         data: {
-          method: "keyboard",
-          key: keyCode,
+          method: "scroll",
           direction: direction,
         },
       };
@@ -263,10 +313,41 @@ export class ComputerUseActions {
 
   async scrollAt(params: ScrollAtParams): Promise<ToolResult> {
     try {
-      const { direction } = params;
+      const { x, y, direction } = params;
+      const page = this.getStagehandPage();
 
-      // For scrollAt, just use the same keyboard approach (ignoring x/y for now as implemented)
-      return await this.scrollDocument(direction);
+      const { x: denormX, y: denormY } = await this.denormalizeCoords(x, y);
+
+      const viewport = await this.getViewportSize();
+      const scrollAmount =
+        (params.magnitude || 1) *
+        Math.min(viewport.height, viewport.width) *
+        0.3;
+
+      let deltaX = 0;
+      let deltaY = 0;
+
+      if (direction === "down") {
+        deltaY = scrollAmount;
+      } else if (direction === "up") {
+        deltaY = -scrollAmount;
+      } else if (direction === "right") {
+        deltaX = scrollAmount;
+      } else {
+        deltaX = -scrollAmount;
+      }
+
+      await page.scroll(denormX, denormY, deltaX, deltaY);
+
+      await this.wait(0.3);
+
+      return {
+        success: true,
+        data: {
+          method: "scroll",
+          direction: direction,
+        },
+      };
     } catch (error) {
       return {
         success: false,
@@ -277,49 +358,15 @@ export class ComputerUseActions {
 
   async keyCombo(keys: string): Promise<ToolResult> {
     try {
-      const tab = this.getActiveTab();
+      const page = this.getStagehandPage();
 
-      const parts = keys.split("+");
-      const key = parts[parts.length - 1];
-      const modifierParts = parts.slice(0, -1).map((m) => m.toLowerCase());
-
-      const electronModifiers: Array<"shift" | "control" | "alt" | "meta"> = [];
-      if (modifierParts.includes("control") || modifierParts.includes("ctrl")) {
-        electronModifiers.push("control");
-      }
-      if (modifierParts.includes("shift")) {
-        electronModifiers.push("shift");
-      }
-      if (modifierParts.includes("alt")) {
-        electronModifiers.push("alt");
-      }
-      if (
-        modifierParts.includes("meta") ||
-        modifierParts.includes("cmd") ||
-        modifierParts.includes("command")
-      ) {
-        electronModifiers.push("meta");
-      }
-
-      const keyCode = this.mapKeyToElectronCode(key);
-
-      tab.webContents.sendInputEvent({
-        type: "keyDown",
-        keyCode,
-        modifiers: electronModifiers,
-      });
-
-      tab.webContents.sendInputEvent({
-        type: "keyUp",
-        keyCode,
-        modifiers: electronModifiers,
-      });
+      await page.keyPress(keys);
 
       await this.waitForPageSettle();
 
       return {
         success: true,
-        data: { key: keyCode, modifiers: electronModifiers },
+        data: { key: keys },
       };
     } catch (error) {
       return {
@@ -330,50 +377,25 @@ export class ComputerUseActions {
   }
 
   async captureScreenshot(): Promise<Buffer> {
-    if (this.stagehand && (this.stagehand as any).page) {
-      try {
-        const activeUrl = await this.getCurrentUrl();
-        // Access context from stagehand
-        const context = (this.stagehand as any).context;
-        if (context) {
-          const pages = context.pages();
-          const page =
-            pages.find((p: any) => p.url() === activeUrl) ||
-            (this.stagehand as any).page;
-
-          if (page) {
-            const buffer = await page.screenshot();
-            return buffer;
-          }
-        }
-      } catch (error) {
-        console.warn(
-          "Stagehand screenshot failed, falling back to Electron:",
-          error
-        );
-      }
-    }
-
-    const tab = this.getActiveTab();
-    const image = await tab.screenshot();
-    return image.toPNG();
+    const page = this.getStagehandPage();
+    return await page.screenshot();
   }
 
   async getCurrentUrl(): Promise<string> {
-    const tab = this.getActiveTab();
-    return tab.url;
+    const page = this.getStagehandPage();
+    return page.url();
   }
 
   async getPageTitle(): Promise<string> {
-    const tab = this.getActiveTab();
-    return tab.title;
+    const page = this.getStagehandPage();
+    return await page.title();
   }
 
   async getPageSnapshot(): Promise<ToolResult> {
     const jsCode = `
       (function() {
         const elements = [];
- 
+
         const interactiveSelectors = [
           'a[href]',
           'button',
@@ -385,17 +407,17 @@ export class ComputerUseActions {
           '[role="textbox"]',
           '[onclick]'
         ];
- 
+
         const interactiveElements = document.querySelectorAll(interactiveSelectors.join(','));
- 
+
         interactiveElements.forEach((el, index) => {
           if (index > 100) return;
- 
+
           const rect = el.getBoundingClientRect();
- 
+
           if (rect.width === 0 || rect.height === 0) return;
           if (rect.top > window.innerHeight || rect.bottom < 0) return;
- 
+
           elements.push({
             type: el.tagName.toLowerCase(),
             role: el.getAttribute('role') || el.tagName.toLowerCase(),
@@ -416,7 +438,7 @@ export class ComputerUseActions {
             }
           });
         });
- 
+
         return {
           success: true,
           data: {
@@ -435,7 +457,8 @@ export class ComputerUseActions {
     `;
 
     try {
-      const result = await this.executeJS(jsCode);
+      const page = this.getStagehandPage();
+      const result = await page.evaluate(jsCode);
       return result;
     } catch (error) {
       return {
@@ -449,58 +472,14 @@ export class ComputerUseActions {
     return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
   }
 
-  private getActiveTab(): Tab {
-    const tab = this.window.activeTab;
-    if (!tab) {
-      throw new Error("No active tab");
-    }
-    return tab;
-  }
-
-  private async executeJS(code: string): Promise<any> {
-    const tab = this.getActiveTab();
-    return await tab.webContents.executeJavaScript(code);
-  }
-
   private async waitForPageSettle(): Promise<void> {
-    await this.wait(0.3);
-
-    const jsCode = `
-      new Promise(resolve => {
-        if (document.readyState === 'complete') {
-          resolve();
-        } else {
-          window.addEventListener('load', resolve, { once: true });
-          setTimeout(resolve, 1000);
-        }
-      })
-    `;
-
     try {
-      await Promise.race([this.executeJS(jsCode), this.wait(2)]);
-    } catch {}
-  }
-
-  private async pressKey(keyCode: string): Promise<void> {
-    const tab = this.getActiveTab();
-    tab.webContents.sendInputEvent({ type: "keyDown", keyCode });
-    tab.webContents.sendInputEvent({ type: "keyUp", keyCode });
-  }
-
-  private async selectAll(): Promise<void> {
-    const tab = this.getActiveTab();
-    const modifier: "meta" | "control" =
-      process.platform === "darwin" ? "meta" : "control";
-    tab.webContents.sendInputEvent({
-      type: "keyDown",
-      keyCode: "A",
-      modifiers: [modifier],
-    });
-    tab.webContents.sendInputEvent({
-      type: "keyUp",
-      keyCode: "A",
-      modifiers: [modifier],
-    });
+      const page = this.getStagehandPage();
+      await page.waitForLoadState("networkidle", 2000);
+    } catch (error) {
+      // If networkidle times out, just wait a bit
+      await this.wait(0.3);
+    }
   }
 
   private async getElementInfoAt(
@@ -508,52 +487,37 @@ export class ComputerUseActions {
     y: number
   ): Promise<Record<string, any>> {
     try {
-      return await this.executeJS(`
-        (function() {
-          const el = document.elementFromPoint(${x}, ${y});
-          if (!el) return { tagName: 'unknown' };
+      const page = this.getStagehandPage();
+      return await page.evaluate(
+        (coords) => {
+          const el = document.elementFromPoint(coords.x, coords.y) as
+            | (Element & { innerText?: string; href?: string })
+            | null;
+          if (!el) return { tagName: "unknown" };
+          const anchor =
+            (el as any).href ||
+            (el.closest && el.closest("a") && (el.closest("a") as any).href) ||
+            undefined;
           return {
             tagName: el.tagName,
-            id: el.id || undefined,
-            className: el.className || undefined,
-            text: el.innerText?.slice(0, 50) || undefined,
-            href: el.href || el.closest('a')?.href || undefined
+            id: (el as any).id || undefined,
+            className: (el as any).className || undefined,
+            text:
+              (el as any).innerText &&
+              String((el as any).innerText).slice(0, 50),
+            href: anchor,
           };
-        })()
-      `);
+        },
+        { x, y }
+      );
     } catch {
       return { tagName: "unknown" };
     }
   }
 
-  private mapKeyToElectronCode(key: string): string {
-    const keyMap: Record<string, string> = {
-      enter: "Return",
-      return: "Return",
-      escape: "Escape",
-      esc: "Escape",
-      tab: "Tab",
-      backspace: "Backspace",
-      delete: "Delete",
-      space: "Space",
-      arrowup: "Up",
-      arrowdown: "Down",
-      arrowleft: "Left",
-      arrowright: "Right",
-      up: "Up",
-      down: "Down",
-      left: "Left",
-      right: "Right",
-      home: "Home",
-      end: "End",
-      pageup: "PageUp",
-      pagedown: "PageDown",
-    };
-    return keyMap[key.toLowerCase()] || key;
-  }
-
   private async getViewportSize(): Promise<{ width: number; height: number }> {
-    return await this.executeJS(
+    const page = this.getStagehandPage();
+    return await page.evaluate(
       "({ width: window.innerWidth, height: window.innerHeight })"
     );
   }
