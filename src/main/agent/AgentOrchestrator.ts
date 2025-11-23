@@ -3,7 +3,6 @@ import { Window } from "../Window";
 import { ComputerUseClient } from "./ComputerUseClient";
 import { ComputerUseActions } from "./ComputerUseActions";
 import { ContextManager } from "./ContextManager";
-import { AgentOverlay } from "./AgentOverlay";
 import {
   AgentAction,
   GeminiFunctionCall,
@@ -24,7 +23,6 @@ export class AgentOrchestrator extends EventEmitter {
   private gemini: ComputerUseClient;
   private tools: ComputerUseActions;
   private context: ContextManager;
-  private overlay: AgentOverlay | null = null;
   private window: Window;
   private isRunning: boolean = false;
   private shouldStop: boolean = false;
@@ -56,20 +54,9 @@ export class AgentOrchestrator extends EventEmitter {
     this.lastActionResult = null;
 
     try {
-      const activeTab = this.window.activeTab;
-      if (activeTab) {
-        this.overlay = new AgentOverlay(activeTab.webContents);
-        await this.overlay.inject();
-      }
-
       // Start the task in context
       this.context.startTask(goal);
       this.emit("start", { goal });
-
-      // Update overlay
-      if (this.overlay) {
-        await this.overlay.update({ type: "start", data: { goal } });
-      }
 
       // Reset Gemini conversation
       this.gemini.resetConversation();
@@ -85,24 +72,8 @@ export class AgentOrchestrator extends EventEmitter {
         error: errorMessage,
         turn: this.context.getCurrentTurn(),
       });
-
-      // Update overlay with error
-      if (this.overlay) {
-        await this.overlay.update({
-          type: "error",
-          data: { error: errorMessage },
-        });
-      }
     } finally {
       this.isRunning = false;
-
-      // Remove overlay after a delay
-      if (this.overlay) {
-        setTimeout(async () => {
-          await this.overlay?.remove();
-          this.overlay = null;
-        }, 3000);
-      }
     }
   }
 
@@ -202,20 +173,12 @@ export class AgentOrchestrator extends EventEmitter {
     const turn = this.context.getCurrentTurn();
     this.emit("turn", { turn });
 
-    if (this.overlay) {
-      await this.overlay.update({ type: "turn", data: { turn } });
-    }
-
     const { screenshot, url } = await this.captureState();
     this.context.setCurrentUrl(url);
-    this.emit("screenshot", { turn });
-
-    if (this.overlay && screenshot) {
-      await this.overlay.update({
-        type: "screenshot",
-        data: { screenshot: screenshot.toString("base64") },
-      });
-    }
+    this.emit("screenshot", {
+      turn,
+      screenshot: screenshot.toString("base64"),
+    });
 
     const isInitial = turn === 1;
     const response = isInitial
@@ -235,23 +198,9 @@ export class AgentOrchestrator extends EventEmitter {
 
     this.emit("reasoning", { reasoning: response.reasoning, turn });
 
-    if (this.overlay) {
-      await this.overlay.update({
-        type: "reasoning",
-        data: { reasoning: response.reasoning },
-      });
-    }
-
     if (response.isComplete) {
       const ctx = this.context.getContext() as any;
       ctx.finalResponse = response.finalResponse;
-
-      if (this.overlay) {
-        await this.overlay.update({
-          type: "complete",
-          data: { finalResponse: response.finalResponse },
-        });
-      }
 
       return true;
     }
@@ -275,14 +224,6 @@ export class AgentOrchestrator extends EventEmitter {
       args: call.args,
       turn,
     });
-
-    // Update overlay with action
-    if (this.overlay) {
-      await this.overlay.update({
-        type: "action",
-        data: { name: call.name, args: call.args },
-      });
-    }
 
     // Create action record
     const action: AgentAction = {
@@ -315,14 +256,6 @@ export class AgentOrchestrator extends EventEmitter {
         success: result.success !== false,
       });
 
-      // Update overlay with action completion
-      if (this.overlay) {
-        await this.overlay.update({
-          type: "actionComplete",
-          data: { success: result.success !== false, result },
-        });
-      }
-
       // Store for next turn
       this.lastActionName = call.name;
       this.lastActionResult = result;
@@ -336,14 +269,6 @@ export class AgentOrchestrator extends EventEmitter {
         result: { success: false, error: errorMessage },
         success: false,
       });
-
-      // Update overlay with action failure
-      if (this.overlay) {
-        await this.overlay.update({
-          type: "actionComplete",
-          data: { success: false, result: { error: errorMessage } },
-        });
-      }
 
       throw error;
     }
@@ -384,9 +309,8 @@ export class AgentOrchestrator extends EventEmitter {
 
       case "scroll_document":
         const scrollDocArgs = args as ScrollDocumentArgs;
-        return await this.tools.scrollDocument(
-          scrollDocArgs.scroll_amount > 0 ? "down" : "up"
-        );
+        const direction = scrollDocArgs.scroll_amount > 0 ? "down" : "up";
+        return await this.tools.scrollDocument(direction);
 
       case "scroll_at":
         const scrollArgs = args as ScrollAtArgs;
@@ -394,7 +318,6 @@ export class AgentOrchestrator extends EventEmitter {
           x: scrollArgs.x,
           y: scrollArgs.y,
           direction: scrollArgs.scroll_amount > 0 ? "down" : "up",
-          magnitude: Math.abs(scrollArgs.scroll_amount || 500),
         });
 
       case "key_combination":
