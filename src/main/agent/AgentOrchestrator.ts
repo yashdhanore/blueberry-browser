@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { Stagehand } from "@browserbasehq/stagehand";
 import { Window } from "../Window";
 import { ComputerUseClient } from "./ComputerUseClient";
 import { ComputerUseActions } from "./ComputerUseActions";
@@ -24,6 +25,7 @@ export class AgentOrchestrator extends EventEmitter {
   private tools: ComputerUseActions;
   private context: ContextManager;
   private window: Window;
+  private stagehand: Stagehand | null = null;
   private isRunning: boolean = false;
   private shouldStop: boolean = false;
 
@@ -53,10 +55,24 @@ export class AgentOrchestrator extends EventEmitter {
     this.lastActionName = "";
     this.lastActionResult = null;
 
+    this.context.startTask(goal);
+    this.emit("start", { goal });
+
     try {
-      // Start the task in context
-      this.context.startTask(goal);
-      this.emit("start", { goal });
+      // Initialize Stagehand if not already initialized
+      if (!this.stagehand) {
+        console.log("Initializing Stagehand connected to Electron...");
+        const cdpUrl = await this.resolveCdpUrl();
+        this.stagehand = new Stagehand({
+          env: "LOCAL",
+          localBrowserLaunchOptions: {
+            cdpUrl,
+          },
+        });
+        await this.stagehand.init();
+        this.tools.setStagehand(this.stagehand);
+        console.log("Stagehand initialized.");
+      }
 
       // Reset Gemini conversation
       this.gemini.resetConversation();
@@ -398,5 +414,32 @@ export class AgentOrchestrator extends EventEmitter {
     this.context.on("actionUpdated", (action: AgentAction) => {
       this.emit("actionUpdated", { action });
     });
+  }
+
+  /**
+   * Resolve the CDP URL for connecting to Electron's debugging endpoint.
+   * Attempts to read webSocketDebuggerUrl from /json/version; falls back to base HTTP URL.
+   */
+  private async resolveCdpUrl(): Promise<string> {
+    const base =
+      process.env.ELECTRON_REMOTE_DEBUGGING_URL || "http://127.0.0.1:9222";
+    const versionUrl = `${base.replace(/\/$/, "")}/json/version`;
+    try {
+      const res = await fetch(versionUrl);
+      if (!res.ok) {
+        throw new Error(`CDP endpoint returned ${res.status}`);
+      }
+      const data = (await res.json()) as { webSocketDebuggerUrl?: string };
+      if (data?.webSocketDebuggerUrl) {
+        return data.webSocketDebuggerUrl;
+      }
+      return base;
+    } catch (err) {
+      console.warn(
+        `Failed to resolve CDP ws endpoint from ${versionUrl}. Falling back to ${base}:`,
+        err
+      );
+      return base;
+    }
   }
 }

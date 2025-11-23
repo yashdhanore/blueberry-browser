@@ -1,4 +1,5 @@
 import { Window } from "../Window";
+import { Stagehand } from "@browserbasehq/stagehand";
 import { Tab } from "../Tab";
 import {
   COORDINATE_RANGE,
@@ -9,9 +10,14 @@ import {
 
 export class ComputerUseActions {
   private window: Window;
+  private stagehand: Stagehand | null = null;
 
   constructor(window: Window) {
     this.window = window;
+  }
+
+  setStagehand(stagehand: Stagehand) {
+    this.stagehand = stagehand;
   }
 
   async denormalizeCoords(
@@ -257,9 +263,9 @@ export class ComputerUseActions {
 
   async scrollAt(params: ScrollAtParams): Promise<ToolResult> {
     try {
-      const { x, y, direction } = params;
+      const { direction } = params;
 
-      // For scrollAt, just use the same keyboard approach
+      // For scrollAt, just use the same keyboard approach (ignoring x/y for now as implemented)
       return await this.scrollDocument(direction);
     } catch (error) {
       return {
@@ -324,6 +330,30 @@ export class ComputerUseActions {
   }
 
   async captureScreenshot(): Promise<Buffer> {
+    if (this.stagehand && (this.stagehand as any).page) {
+      try {
+        const activeUrl = await this.getCurrentUrl();
+        // Access context from stagehand
+        const context = (this.stagehand as any).context;
+        if (context) {
+          const pages = context.pages();
+          const page =
+            pages.find((p: any) => p.url() === activeUrl) ||
+            (this.stagehand as any).page;
+
+          if (page) {
+            const buffer = await page.screenshot();
+            return buffer;
+          }
+        }
+      } catch (error) {
+        console.warn(
+          "Stagehand screenshot failed, falling back to Electron:",
+          error
+        );
+      }
+    }
+
     const tab = this.getActiveTab();
     const image = await tab.screenshot();
     return image.toPNG();

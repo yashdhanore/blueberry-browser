@@ -15,6 +15,10 @@ const createWindow = (): Window => {
   return window;
 };
 
+// Enable remote debugging for Stagehand/Playwright
+app.commandLine.appendSwitch("remote-debugging-port", "9222");
+app.commandLine.appendSwitch("remote-allow-origins", "*");
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId("com.electron");
 
