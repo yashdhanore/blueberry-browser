@@ -107,7 +107,7 @@ export class AgentOrchestrator extends EventEmitter {
 
     let page;
     try {
-      page = await this.stagehandService.getPageForActiveTab(this.window);
+      page = await this.stagehandService.getActivePage(this.window);
     } catch (error) {
       console.warn("Failed to resolve Stagehand page, falling back:", error);
       const ctx = (stagehand as any).context;

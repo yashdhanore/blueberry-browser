@@ -7,7 +7,7 @@ export class SideBar {
   private webContentsView: WebContentsView;
   private baseWindow: BaseWindow;
   private llmClient: LLMClient;
-  private isVisible: boolean = true;
+  private _isVisible: boolean = true;
 
   constructor(baseWindow: BaseWindow) {
     this.baseWindow = baseWindow;
@@ -47,7 +47,7 @@ export class SideBar {
   }
 
   private setupBounds(): void {
-    if (!this.isVisible) return;
+    if (!this._isVisible) return;
 
     const bounds = this.baseWindow.getBounds();
     this.webContentsView.setBounds({
@@ -59,7 +59,7 @@ export class SideBar {
   }
 
   updateBounds(): void {
-    if (this.isVisible) {
+    if (this._isVisible) {
       this.setupBounds();
     } else {
       // Hide the sidebar
@@ -81,12 +81,12 @@ export class SideBar {
   }
 
   show(): void {
-    this.isVisible = true;
+    this._isVisible = true;
     this.setupBounds();
   }
 
   hide(): void {
-    this.isVisible = false;
+    this._isVisible = false;
     this.webContentsView.setBounds({
       x: 0,
       y: 0,
@@ -96,14 +96,14 @@ export class SideBar {
   }
 
   toggle(): void {
-    if (this.isVisible) {
+    if (this._isVisible) {
       this.hide();
     } else {
       this.show();
     }
   }
 
-  getIsVisible(): boolean {
-    return this.isVisible;
+  get isVisible(): boolean {
+    return this._isVisible;
   }
 }

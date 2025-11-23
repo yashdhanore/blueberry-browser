@@ -1,4 +1,5 @@
 import { Stagehand } from "@browserbasehq/stagehand";
+import type { Page } from "@browserbasehq/stagehand";
 import type { Window } from "../Window";
 
 /**
@@ -48,7 +49,7 @@ export class StagehandService {
   /**
    * Resolve the underlying v3 context, if Stagehand has been initialized.
    */
-  getContext(): any | null {
+  getContext(): unknown | null {
     if (!this.stagehand) return null;
     return (this.stagehand as any).context ?? null;
   }
@@ -57,14 +58,14 @@ export class StagehandService {
    * Resolve the best Stagehand page corresponding to the active tab
    * in the given Electron window.
    */
-  async getPageForActiveTab(window: Window): Promise<any> {
+  async getActivePage(window: Window): Promise<Page> {
     const stagehand = await this.getStagehand();
     const ctx = (stagehand as any).context;
     if (!ctx) {
       throw new Error("Stagehand context not available");
     }
 
-    const pages = ctx.pages() as any[];
+    const pages = ctx.pages() as Page[];
     const activeTab = window.activeTab;
 
     const isAuxiliaryUrl = (url: string | undefined | null) => {

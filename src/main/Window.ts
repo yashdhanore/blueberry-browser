@@ -233,7 +233,7 @@ export class Window {
   private updateTabBounds(): void {
     const bounds = this._baseWindow.getBounds();
     // Only subtract sidebar width if it's visible
-    const sidebarWidth = this._sideBar.getIsVisible() ? 400 : 0;
+    const sidebarWidth = this._sideBar.isVisible ? 400 : 0;
 
     this.tabsMap.forEach((tab) => {
       tab.view.setBounds({

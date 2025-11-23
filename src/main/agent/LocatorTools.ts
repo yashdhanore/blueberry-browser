@@ -42,7 +42,7 @@ const resolveLocator = async (page: Page, selector: string) => {
 };
 
 const resolvePage = async (supplier: PageSupplier): Promise<Page> => {
-  return await Promise.resolve(supplier());
+  return supplier();
 };
 
 export const createLocatorTools = (pageSupplier: PageSupplier): ToolSet => {
