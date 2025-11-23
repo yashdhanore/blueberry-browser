@@ -14,6 +14,7 @@ import {
   AgentErrorCode,
 } from "./ComputerUseTypes";
 import { StagehandService } from "./StagehandService";
+import { createLocatorTools } from "./LocatorTools";
 
 export class AgentOrchestrator extends EventEmitter {
   private window: Window;
@@ -123,6 +124,8 @@ export class AgentOrchestrator extends EventEmitter {
     const goal = this.context.getGoal();
     const config = this.context.getConfig();
 
+    const customSelectorTools = createLocatorTools(() => page);
+
     const agent = stagehand.agent({
       cua: true,
       model: "google/gemini-2.5-computer-use-preview-10-2025",
@@ -134,7 +137,9 @@ You're a helpful assistant that can control a web browser called Blueberry Brows
 - Never click or type in the top bar or sidebar UI of the app.
 - Avoid destructive or irreversible actions (e.g. deleting data, posting content) unless explicitly asked.
 - Prefer clear navigation, reading, searching, and extracting information for the user.
+      - Prefer the custom selector tools (click_selector, fill_selector, type_selector, press_keys) whenever you can identify a stable CSS or XPath selector. This avoids coordinate drift on high-DPI screens.
       `.trim(),
+      tools: customSelectorTools,
     });
 
     let result: StagehandAgentResult;

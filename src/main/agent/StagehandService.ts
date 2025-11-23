@@ -148,6 +148,8 @@ export class StagehandService {
 
     const stagehand = new Stagehand({
       env: "LOCAL",
+      experimental: true,
+      disableAPI: true,
       localBrowserLaunchOptions: {
         cdpUrl,
       },
