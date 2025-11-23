@@ -1,4 +1,4 @@
-export const COORDINATE_RANGE = 999;
+export const COORDINATE_RANGE = 1000;
 
 /**
  * Possible states of the agent during task execution
@@ -20,20 +20,6 @@ export interface NormalizedCoordinates {
 export interface PixelCoordinates {
   x: number;
   y: number;
-}
-
-export interface SafetyDecision {
-  decision: "ALLOWED" | "REQUIRES_CONFIRMATION" | "BLOCKED";
-  reasoning?: string;
-  risk_level?: "LOW" | "MEDIUM" | "HIGH";
-}
-
-/**
- * User's response to a safety confirmation request
- */
-export interface SafetyConfirmationResponse {
-  approved: boolean;
-  remember?: boolean;
 }
 
 /**
@@ -103,79 +89,6 @@ export interface TaskContext {
   error?: string;
   finalResponse?: string;
   conversationHistory: AgentMessage[];
-}
-
-/**
- * Types of events sent to the UI
- */
-export enum AgentEventType {
-  TASK_STARTED = "TASK_STARTED",
-  TASK_COMPLETED = "TASK_COMPLETED",
-  TASK_FAILED = "TASK_FAILED",
-  STATE_CHANGED = "STATE_CHANGED",
-  ACTION_STARTED = "ACTION_STARTED",
-  ACTION_COMPLETED = "ACTION_COMPLETED",
-  ACTION_FAILED = "ACTION_FAILED",
-  REASONING_UPDATE = "REASONING_UPDATE",
-  SCREENSHOT_UPDATE = "SCREENSHOT_UPDATE",
-  SAFETY_CONFIRMATION_NEEDED = "SAFETY_CONFIRMATION_NEEDED",
-  PROGRESS_UPDATE = "PROGRESS_UPDATE",
-}
-
-/**
- * Event payload to UI
- */
-export interface AgentUIUpdate {
-  type: AgentEventType;
-  taskId: string;
-  timestamp: number;
-  data?: {
-    state?: AgentState;
-    action?: AgentAction;
-    reasoning?: string;
-    screenshot?: string; // Base64
-    url?: string;
-    error?: string;
-    finalResponse?: string;
-    safetyDecision?: SafetyDecision;
-    currentStep?: number;
-    totalSteps?: number;
-  };
-}
-
-/**
- * Result from executing an MCP tool
- */
-export interface MCPToolResult {
-  success: boolean;
-  data?: any;
-  error?: string;
-  screenshot?: Buffer;
-  url?: string;
-}
-
-export interface PageSnapshot {
-  url: string;
-  title: string;
-  elements: PageElement[];
-  timestamp: number;
-}
-
-/**
- * Simplified page element for context
- */
-export interface PageElement {
-  type: string;
-  role?: string; // ARIA role
-  text?: string; // Visible text
-  value?: string; // Input value
-  bounds?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  attributes?: Record<string, string>;
 }
 
 /**

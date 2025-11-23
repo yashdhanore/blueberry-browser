@@ -1,5 +1,5 @@
 import { Window } from "../Window";
-import { Stagehand } from "@browserbasehq/stagehand";
+import { StagehandService } from "./StagehandService";
 import {
   COORDINATE_RANGE,
   ScrollAtParams,
@@ -9,75 +9,15 @@ import {
 
 export class ComputerUseActions {
   private window: Window;
-  private stagehand: Stagehand | null = null;
+  private stagehandService: StagehandService;
 
   constructor(window: Window) {
     this.window = window;
+    this.stagehandService = StagehandService.getInstance();
   }
 
-  setStagehand(stagehand: Stagehand) {
-    this.stagehand = stagehand;
-  }
-
-  getStagehandPage() {
-    if (!this.stagehand) {
-      throw new Error("Stagehand not initialized");
-    }
-
-    const ctx = (this.stagehand as any).context;
-    if (!ctx) {
-      throw new Error("Stagehand context not available");
-    }
-
-    const pages = ctx.pages() as any[];
-    const activeTab = this.window.activeTab;
-
-    const isAuxiliaryUrl = (url: string | undefined | null) => {
-      if (!url) return true;
-      const lower = url.toLowerCase();
-      if (lower.startsWith("chrome://") || lower.startsWith("devtools://"))
-        return true;
-      if (lower.includes("localhost:5173/topbar")) return true;
-      if (lower.includes("localhost:5173/sidebar")) return true;
-      return false;
-    };
-
-    if (activeTab) {
-      const tabUrl = activeTab.url;
-      const matchByUrl = pages.find((p) => {
-        try {
-          return p.url() === tabUrl;
-        } catch {
-          return false;
-        }
-      });
-      if (matchByUrl) {
-        return matchByUrl;
-      }
-    }
-
-    const nonAuxPages = pages.filter((p) => {
-      try {
-        return !isAuxiliaryUrl(p.url());
-      } catch {
-        return false;
-      }
-    });
-
-    if (nonAuxPages.length > 0) {
-      const active = ctx.activePage?.();
-      if (active && nonAuxPages.includes(active)) {
-        return active;
-      }
-      return nonAuxPages[nonAuxPages.length - 1];
-    }
-
-    const active = ctx.activePage?.();
-    if (active && !isAuxiliaryUrl(active.url())) {
-      return active;
-    }
-
-    throw new Error("No suitable Stagehand page found for active tab");
+  private async getStagehandPage() {
+    return this.stagehandService.getPageForActiveTab(this.window);
   }
 
   async denormalizeCoords(
@@ -94,7 +34,7 @@ export class ComputerUseActions {
 
   async navigate(url: string): Promise<ToolResult> {
     try {
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
       let finalUrl = url;
       if (!url.startsWith("http://") && !url.startsWith("https://")) {
@@ -121,7 +61,7 @@ export class ComputerUseActions {
 
   async goBack(): Promise<ToolResult> {
     try {
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
       await page.goBack({
         waitUntil: "networkidle",
@@ -143,7 +83,7 @@ export class ComputerUseActions {
 
   async goForward(): Promise<ToolResult> {
     try {
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
       await page.goForward({
         waitUntil: "networkidle",
@@ -166,7 +106,7 @@ export class ComputerUseActions {
   async clickAt(normalizedX: number, normalizedY: number): Promise<ToolResult> {
     try {
       const { x, y } = await this.denormalizeCoords(normalizedX, normalizedY);
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
       await page.click(x, y);
 
@@ -189,9 +129,8 @@ export class ComputerUseActions {
   async typeTextAt(params: TypeParams): Promise<ToolResult> {
     try {
       const { x, y, text, pressEnter = false, clearFirst = true } = params;
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
-      // Click to focus
       await page.click(x, y);
       await this.wait(0.1);
 
@@ -203,7 +142,6 @@ export class ComputerUseActions {
         await page.keyPress("Backspace");
       }
 
-      // Type the text
       await page.type(text);
 
       if (pressEnter) {
@@ -228,10 +166,8 @@ export class ComputerUseActions {
   async hoverAt(normalizedX: number, normalizedY: number): Promise<ToolResult> {
     try {
       const { x, y } = await this.denormalizeCoords(normalizedX, normalizedY);
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
-      // Stagehand doesn't have a direct hover method, but we can use evaluate
-      // to dispatch a mouseover event, or get element info at that location
       await page.evaluate(
         (coords) => {
           const el = document.elementFromPoint(coords.x, coords.y);
@@ -267,9 +203,8 @@ export class ComputerUseActions {
     direction: "up" | "down" | "left" | "right"
   ): Promise<ToolResult> {
     try {
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
-      // Get viewport size for scroll calculation
       const viewport = await this.getViewportSize();
       const scrollAmount = Math.min(viewport.height, viewport.width) * 0.8;
 
@@ -286,7 +221,6 @@ export class ComputerUseActions {
         deltaX = -scrollAmount;
       }
 
-      // Scroll from center of viewport
       await page.scroll(
         viewport.width / 2,
         viewport.height / 2,
@@ -314,7 +248,7 @@ export class ComputerUseActions {
   async scrollAt(params: ScrollAtParams): Promise<ToolResult> {
     try {
       const { x, y, direction } = params;
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
       const { x: denormX, y: denormY } = await this.denormalizeCoords(x, y);
 
@@ -358,7 +292,7 @@ export class ComputerUseActions {
 
   async keyCombo(keys: string): Promise<ToolResult> {
     try {
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
 
       await page.keyPress(keys);
 
@@ -377,17 +311,17 @@ export class ComputerUseActions {
   }
 
   async captureScreenshot(): Promise<Buffer> {
-    const page = this.getStagehandPage();
+    const page = await this.getStagehandPage();
     return await page.screenshot();
   }
 
   async getCurrentUrl(): Promise<string> {
-    const page = this.getStagehandPage();
+    const page = await this.getStagehandPage();
     return page.url();
   }
 
   async getPageTitle(): Promise<string> {
-    const page = this.getStagehandPage();
+    const page = await this.getStagehandPage();
     return await page.title();
   }
 
@@ -457,7 +391,7 @@ export class ComputerUseActions {
     `;
 
     try {
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
       const result = await page.evaluate(jsCode);
       return result;
     } catch (error) {
@@ -474,10 +408,9 @@ export class ComputerUseActions {
 
   private async waitForPageSettle(): Promise<void> {
     try {
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
       await page.waitForLoadState("networkidle", 2000);
-    } catch (error) {
-      // If networkidle times out, just wait a bit
+    } catch {
       await this.wait(0.3);
     }
   }
@@ -487,24 +420,22 @@ export class ComputerUseActions {
     y: number
   ): Promise<Record<string, any>> {
     try {
-      const page = this.getStagehandPage();
+      const page = await this.getStagehandPage();
       return await page.evaluate(
         (coords) => {
-          const el = document.elementFromPoint(coords.x, coords.y) as
-            | (Element & { innerText?: string; href?: string })
-            | null;
+          const el = document.elementFromPoint(
+            coords.x,
+            coords.y
+          ) as HTMLElement | null;
           if (!el) return { tagName: "unknown" };
+          const anchorEl = el.closest("a") as HTMLAnchorElement | null;
           const anchor =
-            (el as any).href ||
-            (el.closest && el.closest("a") && (el.closest("a") as any).href) ||
-            undefined;
+            (el as HTMLAnchorElement).href || anchorEl?.href || undefined;
           return {
             tagName: el.tagName,
-            id: (el as any).id || undefined,
-            className: (el as any).className || undefined,
-            text:
-              (el as any).innerText &&
-              String((el as any).innerText).slice(0, 50),
+            id: el.id || undefined,
+            className: el.className || undefined,
+            text: el.innerText?.slice(0, 50),
             href: anchor,
           };
         },
@@ -516,9 +447,69 @@ export class ComputerUseActions {
   }
 
   private async getViewportSize(): Promise<{ width: number; height: number }> {
-    const page = this.getStagehandPage();
+    const page = await this.getStagehandPage();
     return await page.evaluate(
       "({ width: window.innerWidth, height: window.innerHeight })"
     );
+  }
+
+  async actOnActivePage(
+    instruction: string,
+    options?: Record<string, any>
+  ): Promise<any> {
+    const stagehand = await this.stagehandService.getStagehand();
+    const page = await this.getStagehandPage();
+
+    return stagehand.act(instruction, {
+      ...options,
+      page,
+    } as any);
+  }
+
+  async extractOnActivePage<T = unknown>(
+    instruction: string,
+    schema?: any,
+    options?: Record<string, any>
+  ): Promise<T> {
+    const stagehand = await this.stagehandService.getStagehand();
+    const page = await this.getStagehandPage();
+
+    if (schema) {
+      return stagehand.extract(instruction, schema, {
+        ...options,
+        page,
+      } as any) as unknown as T;
+    }
+
+    return stagehand.extract(instruction, {
+      ...options,
+      page,
+    } as any) as unknown as T;
+  }
+
+  async observeOnActivePage(
+    instruction?: string,
+    options?: Record<string, any>
+  ): Promise<any> {
+    const stagehand = await this.stagehandService.getStagehand();
+    const page = await this.getStagehandPage();
+
+    if (typeof instruction === "string") {
+      return stagehand.observe(instruction, {
+        ...options,
+        page,
+      } as any);
+    }
+
+    if (options) {
+      return stagehand.observe({
+        ...options,
+        page,
+      } as any);
+    }
+
+    return stagehand.observe({
+      page,
+    } as any);
   }
 }

@@ -1,6 +1,5 @@
 import { EventEmitter } from "events";
 import {
-  Stagehand,
   type AgentResult as StagehandAgentResult,
   type AgentAction as StagehandAgentAction,
 } from "@browserbasehq/stagehand";
@@ -14,19 +13,22 @@ import {
   AgentError,
   AgentErrorCode,
 } from "./ComputerUseTypes";
+import { StagehandService } from "./StagehandService";
 
 export class AgentOrchestrator extends EventEmitter {
+  private window: Window;
   private tools: ComputerUseActions;
   private context: ContextManager;
-  private stagehand: Stagehand | null = null;
+  private stagehandService: StagehandService;
   private isRunning: boolean = false;
-  private shouldStop: boolean = false;
 
   constructor(window: Window, _geminiApiKey?: string) {
     super();
 
+    this.window = window;
     this.tools = new ComputerUseActions(window);
     this.context = new ContextManager();
+    this.stagehandService = StagehandService.getInstance();
     this.setupContextForwarding();
   }
 
@@ -36,25 +38,12 @@ export class AgentOrchestrator extends EventEmitter {
     }
 
     this.isRunning = true;
-    this.shouldStop = false;
 
     this.context.startTask(goal);
     this.emit("start", { goal });
 
     try {
-      if (!this.stagehand) {
-        console.log("Initializing Stagehand connected to Electron...");
-        const cdpUrl = await this.resolveCdpUrl();
-        this.stagehand = new Stagehand({
-          env: "LOCAL",
-          localBrowserLaunchOptions: {
-            cdpUrl,
-          },
-        });
-        await this.stagehand.init();
-        this.tools.setStagehand(this.stagehand);
-        console.log("Stagehand initialized.");
-      }
+      await this.stagehandService.getStagehand();
 
       const initialTurn = this.context.getCurrentTurn();
       this.emit("turn", { turn: initialTurn });
@@ -86,7 +75,6 @@ export class AgentOrchestrator extends EventEmitter {
       throw new Error("No task is running");
     }
 
-    this.shouldStop = true;
     this.context.cancelTask();
     this.emit("cancelled", {});
   }
@@ -114,19 +102,14 @@ export class AgentOrchestrator extends EventEmitter {
   }
 
   private async runStagehandAgent(): Promise<void> {
-    if (!this.stagehand) {
-      throw new AgentError(
-        "Stagehand not initialized",
-        AgentErrorCode.INVALID_STATE
-      );
-    }
+    const stagehand = await this.stagehandService.getStagehand();
 
     let page;
     try {
-      page = this.tools.getStagehandPage();
+      page = await this.stagehandService.getPageForActiveTab(this.window);
     } catch (error) {
       console.warn("Failed to resolve Stagehand page, falling back:", error);
-      const ctx = (this.stagehand as any).context;
+      const ctx = (stagehand as any).context;
       page = ctx?.activePage?.();
     }
 
@@ -140,11 +123,11 @@ export class AgentOrchestrator extends EventEmitter {
     const goal = this.context.getGoal();
     const config = this.context.getConfig();
 
-    const agent = this.stagehand.agent({
+    const agent = stagehand.agent({
       cua: true,
       model: "google/gemini-2.5-computer-use-preview-10-2025",
       systemPrompt: `
-You are a careful computer-use agent controlling the Blueberry Browser.
+You're a helpful assistant that can control a web browser called Blueberry Browser.
 
 - Always work toward the user's stated goal step by step.
 - Only interact with the main web content in the active tab.
@@ -180,6 +163,27 @@ You are a careful computer-use agent controlling the Blueberry Browser.
   ): Promise<void> {
     const actions: StagehandAgentAction[] = result.actions || [];
 
+    actions.forEach((action, index) => {
+      const mapped: AgentAction = {
+        id: `stagehand-${Date.now()}-${index}`,
+        timestamp: Date.now(),
+        functionCall: {
+          name: action.type || "stagehand_action",
+          args: {
+            action,
+          },
+        },
+        status: result.success ? ActionStatus.SUCCESS : ActionStatus.FAILED,
+        reasoning: action.reasoning,
+        result: {
+          pageUrl: (action as any).pageUrl,
+          pageText: (action as any).pageText,
+        },
+      };
+
+      this.context.addAction(mapped);
+    });
+
     try {
       const { screenshot, url } = await this.captureState();
       this.context.setCurrentUrl(url);
@@ -193,7 +197,6 @@ You are a careful computer-use agent controlling the Blueberry Browser.
       console.warn("Failed to capture final state:", error);
     }
 
-    // Mark the task as completed and emit final response
     const finalResponse =
       result.message ||
       actions[actions.length - 1]?.reasoning ||
@@ -252,28 +255,5 @@ You are a careful computer-use agent controlling the Blueberry Browser.
     this.context.on("actionUpdated", (action: AgentAction) => {
       this.emit("actionUpdated", { action });
     });
-  }
-
-  private async resolveCdpUrl(): Promise<string> {
-    const base =
-      process.env.ELECTRON_REMOTE_DEBUGGING_URL || "http://127.0.0.1:9222";
-    const versionUrl = `${base.replace(/\/$/, "")}/json/version`;
-    try {
-      const res = await fetch(versionUrl);
-      if (!res.ok) {
-        throw new Error(`CDP endpoint returned ${res.status}`);
-      }
-      const data = (await res.json()) as { webSocketDebuggerUrl?: string };
-      if (data?.webSocketDebuggerUrl) {
-        return data.webSocketDebuggerUrl;
-      }
-      return base;
-    } catch (err) {
-      console.warn(
-        `Failed to resolve CDP ws endpoint from ${versionUrl}. Falling back to ${base}:`,
-        err
-      );
-      return base;
-    }
   }
 }

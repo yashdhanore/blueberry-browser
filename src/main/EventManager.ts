@@ -1,13 +1,16 @@
 import { ipcMain, WebContents } from "electron";
 import type { Window } from "./Window";
 import { AgentOrchestrator } from "./agent/AgentOrchestrator";
+import { ComputerUseActions } from "./agent/ComputerUseActions";
 
 export class EventManager {
   private mainWindow: Window;
   private orchestrator: AgentOrchestrator | null = null;
+  private computerUseActions: ComputerUseActions;
 
   constructor(mainWindow: Window) {
     this.mainWindow = mainWindow;
+    this.computerUseActions = new ComputerUseActions(this.mainWindow);
     this.setupEventHandlers();
   }
 
@@ -29,6 +32,9 @@ export class EventManager {
 
     // Agent events
     this.handleAgentEvents();
+
+    // Stagehand helper events (quickstart-style helpers)
+    this.handleStagehandHelperEvents();
   }
 
   private handleTabEvents(): void {
@@ -164,7 +170,6 @@ export class EventManager {
 
     // Chat message
     ipcMain.handle("sidebar-chat-message", async (_, request) => {
-      // The LLMClient now handles getting the screenshot and context directly
       await this.mainWindow.sidebar.client.sendChatMessage(request);
     });
 
@@ -178,6 +183,43 @@ export class EventManager {
     ipcMain.handle("sidebar-get-messages", () => {
       return this.mainWindow.sidebar.client.getMessages();
     });
+  }
+
+  /**
+   * IPC handlers exposing high-level Stagehand helpers (act/extract/observe)
+   * against the active tab.
+   */
+  private handleStagehandHelperEvents(): void {
+    ipcMain.handle(
+      "stagehand-extract",
+      async (_, instruction: string, options?: Record<string, any>) => {
+        return await this.computerUseActions.extractOnActivePage(
+          instruction,
+          undefined,
+          options
+        );
+      }
+    );
+
+    ipcMain.handle(
+      "stagehand-observe",
+      async (_, instruction?: string, options?: Record<string, any>) => {
+        return await this.computerUseActions.observeOnActivePage(
+          instruction,
+          options
+        );
+      }
+    );
+
+    ipcMain.handle(
+      "stagehand-act",
+      async (_, instruction: string, options?: Record<string, any>) => {
+        return await this.computerUseActions.actOnActivePage(
+          instruction,
+          options
+        );
+      }
+    );
   }
 
   private handlePageContentEvents(): void {

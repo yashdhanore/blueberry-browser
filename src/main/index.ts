@@ -3,6 +3,7 @@ import { electronApp } from "@electron-toolkit/utils";
 import { Window } from "./Window";
 import { AppMenu } from "./Menu";
 import { EventManager } from "./EventManager";
+import { StagehandService } from "./agent/StagehandService";
 
 let mainWindow: Window | null = null;
 let eventManager: EventManager | null = null;
@@ -15,9 +16,10 @@ const createWindow = (): Window => {
   return window;
 };
 
-// Enable remote debugging for Stagehand/Playwright
 app.commandLine.appendSwitch("remote-debugging-port", "9222");
 app.commandLine.appendSwitch("remote-allow-origins", "*");
+app.commandLine.appendSwitch("force-device-scale-factor", "1");
+app.commandLine.appendSwitch("high-dpi-support", "1");
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId("com.electron");
@@ -46,6 +48,8 @@ app.on("window-all-closed", () => {
   if (menu) {
     menu = null;
   }
+
+  void StagehandService.getInstance().shutdown();
 
   if (process.platform !== "darwin") {
     app.quit();
