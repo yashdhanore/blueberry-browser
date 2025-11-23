@@ -215,37 +215,37 @@ export class ComputerUseActions {
   ): Promise<ToolResult> {
     try {
       const tab = this.getActiveTab();
-      const bounds = await this.getViewportSize();
 
-      const centerX = Math.round(bounds.width / 2);
-      const centerY = Math.round(bounds.height / 2);
-
-      const deltaMap = {
-        up: { deltaX: 0, deltaY: 500 },
-        down: { deltaX: 0, deltaY: -500 },
-        left: { deltaX: 500, deltaY: 0 },
-        right: { deltaX: -500, deltaY: 0 },
-      };
-
-      const delta = deltaMap[direction];
+      let keyCode: string;
+      if (direction === "down") {
+        keyCode = "PageDown";
+      } else if (direction === "up") {
+        keyCode = "PageUp";
+      } else if (direction === "right") {
+        keyCode = "Right";
+      } else {
+        keyCode = "Left";
+      }
 
       tab.webContents.sendInputEvent({
-        type: "mouseWheel",
-        x: centerX,
-        y: centerY,
-        deltaX: delta.deltaX,
-        deltaY: delta.deltaY,
+        type: "keyDown",
+        keyCode: keyCode,
       });
 
-      await this.waitForPageSettle();
+      tab.webContents.sendInputEvent({
+        type: "keyUp",
+        keyCode: keyCode,
+      });
 
-      const scrollPos = await this.executeJS(
-        "({ scrollX: window.scrollX, scrollY: window.scrollY })"
-      );
+      await this.wait(0.3);
 
       return {
         success: true,
-        data: scrollPos,
+        data: {
+          method: "keyboard",
+          key: keyCode,
+          direction: direction,
+        },
       };
     } catch (error) {
       return {
@@ -257,35 +257,10 @@ export class ComputerUseActions {
 
   async scrollAt(params: ScrollAtParams): Promise<ToolResult> {
     try {
-      const { x, y, direction, magnitude = 500 } = params;
-      const coords = await this.denormalizeCoords(x, y);
-      const tab = this.getActiveTab();
+      const { x, y, direction } = params;
 
-      const scrollAmount = Math.round((magnitude / COORDINATE_RANGE) * 800);
-
-      const deltaMap = {
-        up: { deltaX: 0, deltaY: scrollAmount },
-        down: { deltaX: 0, deltaY: -scrollAmount },
-        left: { deltaX: scrollAmount, deltaY: 0 },
-        right: { deltaX: -scrollAmount, deltaY: 0 },
-      };
-
-      const delta = deltaMap[direction];
-
-      tab.webContents.sendInputEvent({
-        type: "mouseWheel",
-        x: coords.x,
-        y: coords.y,
-        deltaX: delta.deltaX,
-        deltaY: delta.deltaY,
-      });
-
-      await this.waitForPageSettle();
-
-      return {
-        success: true,
-        data: { direction, magnitude },
-      };
+      // For scrollAt, just use the same keyboard approach
+      return await this.scrollDocument(direction);
     } catch (error) {
       return {
         success: false,
@@ -368,7 +343,7 @@ export class ComputerUseActions {
     const jsCode = `
       (function() {
         const elements = [];
-
+ 
         const interactiveSelectors = [
           'a[href]',
           'button',
@@ -380,17 +355,17 @@ export class ComputerUseActions {
           '[role="textbox"]',
           '[onclick]'
         ];
-
+ 
         const interactiveElements = document.querySelectorAll(interactiveSelectors.join(','));
-
+ 
         interactiveElements.forEach((el, index) => {
           if (index > 100) return;
-
+ 
           const rect = el.getBoundingClientRect();
-
+ 
           if (rect.width === 0 || rect.height === 0) return;
           if (rect.top > window.innerHeight || rect.bottom < 0) return;
-
+ 
           elements.push({
             type: el.tagName.toLowerCase(),
             role: el.getAttribute('role') || el.tagName.toLowerCase(),
@@ -411,7 +386,7 @@ export class ComputerUseActions {
             }
           });
         });
-
+ 
         return {
           success: true,
           data: {

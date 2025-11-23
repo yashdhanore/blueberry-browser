@@ -8,13 +8,49 @@ interface Message {
     isStreaming?: boolean
 }
 
+interface AgentAction {
+    id: string
+    type: string
+    args: any
+    status: 'pending' | 'completed' | 'failed'
+    timestamp: number
+    result?: any
+    error?: string
+}
+
+interface AgentActivity {
+    id: string
+    type: 'agent-task'
+    goal: string
+    isRunning: boolean
+    isPaused: boolean
+    currentTurn: number
+    maxTurns: number
+    actions: AgentAction[]
+    currentReasoning: string | null
+    error: string | null
+    finalResponse: string | null
+    screenshot: string | null
+    timestamp: number
+}
+
 interface ChatContextType {
     messages: Message[]
     isLoading: boolean
+    agentActivity: AgentActivity | null
 
     // Chat actions
     sendMessage: (content: string) => Promise<void>
     clearChat: () => void
+
+    // Agent actions
+    isAgentMode: boolean
+    setAgentMode: (enabled: boolean) => void
+    startAgentTask: (goal: string) => Promise<void>
+    cancelAgentTask: () => Promise<void>
+    pauseAgentTask: () => void
+    resumeAgentTask: () => void
+    resetAgent: () => void
 
     // Page content access
     getPageContent: () => Promise<string | null>
@@ -35,6 +71,8 @@ export const useChat = () => {
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [messages, setMessages] = useState<Message[]>([])
     const [isLoading, setIsLoading] = useState(false)
+    const [isAgentMode, setIsAgentMode] = useState(false)
+    const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(null)
 
     // Load initial messages from main process
     useEffect(() => {
@@ -46,8 +84,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const convertedMessages = storedMessages.map((msg: any, index: number) => ({
                         id: `msg-${index}`,
                         role: msg.role,
-                        content: typeof msg.content === 'string' 
-                            ? msg.content 
+                        content: typeof msg.content === 'string'
+                            ? msg.content
                             : msg.content.find((p: any) => p.type === 'text')?.text || '',
                         timestamp: Date.now(),
                         isStreaming: false
@@ -88,6 +126,71 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (error) {
             console.error('Failed to clear chat:', error)
         }
+    }, [])
+
+    const setAgentMode = useCallback((enabled: boolean) => {
+        setIsAgentMode(enabled)
+    }, [])
+
+    const startAgentTask = useCallback(async (goal: string) => {
+        try {
+            // Create agent activity in the chat
+            const activity: AgentActivity = {
+                id: `agent-${Date.now()}`,
+                type: 'agent-task',
+                goal,
+                isRunning: true,
+                isPaused: false,
+                currentTurn: 0,
+                maxTurns: 20,
+                actions: [],
+                currentReasoning: null,
+                error: null,
+                finalResponse: null,
+                screenshot: null,
+                timestamp: Date.now()
+            }
+            setAgentActivity(activity)
+
+            const result = await window.sidebarAPI.startAgent(goal)
+            if (!result.success) {
+                setAgentActivity(prev => prev ? {
+                    ...prev,
+                    isRunning: false,
+                    error: result.error || 'Failed to start agent'
+                } : null)
+            }
+        } catch (error) {
+            console.error('Failed to start agent:', error)
+            setAgentActivity(prev => prev ? {
+                ...prev,
+                isRunning: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            } : null)
+        }
+    }, [])
+
+    const cancelAgentTask = useCallback(async () => {
+        try {
+            await window.sidebarAPI.cancelAgent()
+            setAgentActivity(prev => prev ? { ...prev, isRunning: false, isPaused: false } : null)
+        } catch (error) {
+            console.error('Failed to cancel agent:', error)
+        }
+    }, [])
+
+    const pauseAgentTask = useCallback(() => {
+        window.sidebarAPI.pauseAgent()
+        setAgentActivity(prev => prev ? { ...prev, isPaused: true } : null)
+    }, [])
+
+    const resumeAgentTask = useCallback(() => {
+        window.sidebarAPI.resumeAgent()
+        setAgentActivity(prev => prev ? { ...prev, isPaused: false } : null)
+    }, [])
+
+    const resetAgent = useCallback(() => {
+        setAgentActivity(null)
     }, [])
 
     const getPageContent = useCallback(async () => {
@@ -132,8 +235,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const convertedMessages = updatedMessages.map((msg: any, index: number) => ({
                 id: `msg-${index}`,
                 role: msg.role,
-                content: typeof msg.content === 'string' 
-                    ? msg.content 
+                content: typeof msg.content === 'string'
+                    ? msg.content
                     : msg.content.find((p: any) => p.type === 'text')?.text || '',
                 timestamp: Date.now(),
                 isStreaming: false
@@ -141,20 +244,108 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setMessages(convertedMessages)
         }
 
+        // Listen for agent updates
+        const handleAgentUpdate = (update: { type: string; data: any }) => {
+            console.log('[ChatContext] Received agent update:', update.type, update.data)
+
+            setAgentActivity(prev => {
+                if (!prev) return null
+
+                switch (update.type) {
+                    case 'start':
+                        return { ...prev, goal: update.data.goal, isRunning: true }
+
+                    case 'turn':
+                        return { ...prev, currentTurn: update.data.turn }
+
+                    case 'reasoning':
+                        return { ...prev, currentReasoning: update.data.reasoning }
+
+                    case 'screenshot':
+                        return { ...prev, screenshot: update.data.screenshot || null }
+
+                    case 'action':
+                        return {
+                            ...prev,
+                            actions: [
+                                ...prev.actions,
+                                {
+                                    id: `action-${Date.now()}-${Math.random()}`,
+                                    type: update.data.name,
+                                    args: update.data.args,
+                                    status: 'pending',
+                                    timestamp: Date.now(),
+                                }
+                            ]
+                        }
+
+                    case 'actionComplete':
+                        return {
+                            ...prev,
+                            actions: prev.actions.map((action, index) =>
+                                index === prev.actions.length - 1 && action.status === 'pending'
+                                    ? {
+                                        ...action,
+                                        status: update.data.success ? 'completed' : 'failed',
+                                        result: update.data.result
+                                    }
+                                    : action
+                            )
+                        }
+
+                    case 'complete':
+                        return {
+                            ...prev,
+                            isRunning: false,
+                            finalResponse: update.data.finalResponse || 'Task completed successfully'
+                        }
+
+                    case 'error':
+                        return {
+                            ...prev,
+                            isRunning: false,
+                            error: update.data.error
+                        }
+
+                    case 'cancelled':
+                        return { ...prev, isRunning: false, isPaused: false }
+
+                    case 'paused':
+                        return { ...prev, isPaused: true }
+
+                    case 'resumed':
+                        return { ...prev, isPaused: false }
+
+                    default:
+                        return prev
+                }
+            })
+        }
+
         window.sidebarAPI.onChatResponse(handleChatResponse)
         window.sidebarAPI.onMessagesUpdated(handleMessagesUpdated)
+        window.sidebarAPI.onAgentUpdate(handleAgentUpdate)
 
         return () => {
             window.sidebarAPI.removeChatResponseListener()
             window.sidebarAPI.removeMessagesUpdatedListener()
+            window.sidebarAPI.removeAgentUpdateListener()
         }
     }, [])
 
     const value: ChatContextType = {
         messages,
         isLoading,
+        agentActivity,
         sendMessage,
         clearChat,
+        isAgentMode,
+        setAgentMode,
+        startAgentTask,
+        cancelAgentTask,
+        pauseAgentTask,
+        resumeAgentTask,
+        resetAgent,
         getPageContent,
         getPageText,
         getCurrentUrl
@@ -166,4 +357,3 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         </ChatContext.Provider>
     )
 }
-

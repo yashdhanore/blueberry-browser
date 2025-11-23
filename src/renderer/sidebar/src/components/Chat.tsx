@@ -2,10 +2,11 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { ArrowUp, Square, Sparkles, Plus } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Plus, Bot } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
+import { AgentActivityCard } from './AgentActivityCard'
 
 interface Message {
     id: string
@@ -16,12 +17,13 @@ interface Message {
 }
 
 // Auto-scroll hook
-const useAutoScroll = (messages: Message[]) => {
+const useAutoScroll = (messages: Message[], agentActivity: any) => {
     const scrollRef = useRef<HTMLDivElement>(null)
     const prevCount = useRef(0)
 
     useLayoutEffect(() => {
-        if (messages.length > prevCount.current) {
+        const currentCount = messages.length + (agentActivity ? 1 : 0)
+        if (currentCount > prevCount.current) {
             setTimeout(() => {
                 scrollRef.current?.scrollIntoView({
                     behavior: 'smooth',
@@ -29,8 +31,8 @@ const useAutoScroll = (messages: Message[]) => {
                 })
             }, 100)
         }
-        prevCount.current = messages.length
-    }, [messages.length])
+        prevCount.current = currentCount
+    }, [messages.length, agentActivity])
 
     return scrollRef
 }
@@ -73,14 +75,14 @@ const StreamingText: React.FC<{ content: string }> = ({ content }) => {
 
 // Markdown Renderer Component
 const Markdown: React.FC<{ content: string }> = ({ content }) => (
-    <div className="prose prose-sm dark:prose-invert max-w-none 
-                    prose-headings:text-foreground prose-p:text-foreground 
-                    prose-strong:text-foreground prose-ul:text-foreground 
+    <div className="prose prose-sm dark:prose-invert max-w-none
+                    prose-headings:text-foreground prose-p:text-foreground
+                    prose-strong:text-foreground prose-ul:text-foreground
                     prose-ol:text-foreground prose-li:text-foreground
                     prose-a:text-primary hover:prose-a:underline
-                    prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 
+                    prose-code:bg-muted prose-code:px-1 prose-code:py-0.5
                     prose-code:rounded prose-code:text-sm prose-code:text-foreground
-                    prose-pre:bg-muted dark:prose-pre:bg-muted/50 prose-pre:p-3 
+                    prose-pre:bg-muted dark:prose-pre:bg-muted/50 prose-pre:p-3
                     prose-pre:rounded-lg prose-pre:overflow-x-auto">
         <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks]}
@@ -150,11 +152,14 @@ const LoadingIndicator: React.FC = () => {
     )
 }
 
-// Chat Input Component with pill design
+// Chat Input Component with pill design and agent toggle
 const ChatInput: React.FC<{
     onSend: (message: string) => void
+    onAgentSend: (goal: string) => void
     disabled: boolean
-}> = ({ onSend, disabled }) => {
+    isAgentMode: boolean
+    onAgentModeChange: (enabled: boolean) => void
+}> = ({ onSend, onAgentSend, disabled, isAgentMode, onAgentModeChange }) => {
     const [value, setValue] = useState('')
     const [isFocused, setIsFocused] = useState(false)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -171,7 +176,11 @@ const ChatInput: React.FC<{
 
     const handleSubmit = () => {
         if (value.trim() && !disabled) {
-            onSend(value.trim())
+            if (isAgentMode) {
+                onAgentSend(value.trim())
+            } else {
+                onSend(value.trim())
+            }
             setValue('')
             // Reset textarea height
             if (textareaRef.current) {
@@ -193,6 +202,22 @@ const ChatInput: React.FC<{
             "shadow-chat animate-spring-scale outline-none transition-all duration-200",
             isFocused ? "border-primary/20 dark:border-primary/30" : "border-border"
         )}>
+            {/* Agent Mode Toggle */}
+            <div className="px-3 pb-2">
+                <button
+                    onClick={() => onAgentModeChange(!isAgentMode)}
+                    className={cn(
+                        "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-all",
+                        isAgentMode
+                            ? "bg-primary/10 text-primary border border-primary/20"
+                            : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    )}
+                >
+                    <Bot className="size-3" />
+                    <span className="font-medium">{isAgentMode ? 'Agent Mode' : 'Chat Mode'}</span>
+                </button>
+            </div>
+
             {/* Input Area */}
             <div className="w-full px-3 py-2">
                 <div className="w-full flex items-start gap-3">
@@ -204,8 +229,8 @@ const ChatInput: React.FC<{
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
                             onKeyDown={handleKeyDown}
-                            placeholder="Send a message..."
-                            className="w-full resize-none outline-none bg-transparent 
+                            placeholder={isAgentMode ? "What task should the agent perform?" : "Send a message..."}
+                            className="w-full resize-none outline-none bg-transparent
                                      text-foreground placeholder:text-muted-foreground
                                      min-h-[24px] max-h-[200px]"
                             rows={1}
@@ -224,7 +249,7 @@ const ChatInput: React.FC<{
                     className={cn(
                         "size-9 rounded-full flex items-center justify-center",
                         "transition-all duration-200",
-                        "bg-primary text-primary-foreground",
+                        isAgentMode ? "bg-primary text-primary-foreground" : "bg-primary text-primary-foreground",
                         "hover:opacity-80 disabled:opacity-50"
                     )}
                 >
@@ -263,8 +288,25 @@ const ConversationTurnComponent: React.FC<{
 
 // Main Chat Component
 export const Chat: React.FC = () => {
-    const { messages, isLoading, sendMessage, clearChat } = useChat()
-    const scrollRef = useAutoScroll(messages)
+    const {
+        messages,
+        isLoading,
+        agentActivity,
+        sendMessage,
+        clearChat,
+        isAgentMode,
+        setAgentMode,
+        startAgentTask,
+        cancelAgentTask,
+        pauseAgentTask,
+        resumeAgentTask,
+        resetAgent
+    } = useChat()
+    const scrollRef = useAutoScroll(messages, agentActivity)
+
+    const handleAgentSend = (goal: string) => {
+        startAgentTask(goal)
+    }
 
     // Group messages into conversation turns
     const conversationTurns: ConversationTurn[] = []
@@ -307,7 +349,7 @@ export const Chat: React.FC = () => {
 
                 <div className="pb-4 relative max-w-3xl mx-auto px-4">
 
-                    {messages.length === 0 ? (
+                    {messages.length === 0 && !agentActivity ? (
                         // Empty State
                         <div className="flex items-center justify-center h-full min-h-[400px]">
                             <div className="text-center animate-fade-in max-w-md mx-auto gap-2 flex flex-col">
@@ -319,7 +361,6 @@ export const Chat: React.FC = () => {
                         </div>
                     ) : (
                         <>
-
                             {/* Render conversation turns */}
                             {conversationTurns.map((turn, index) => (
                                 <ConversationTurnComponent
@@ -331,6 +372,28 @@ export const Chat: React.FC = () => {
                                     }
                                 />
                             ))}
+
+                            {/* Agent Activity Card */}
+                            {agentActivity && (
+                                <div className="pt-12">
+                                    <AgentActivityCard
+                                        goal={agentActivity.goal}
+                                        isRunning={agentActivity.isRunning}
+                                        isPaused={agentActivity.isPaused}
+                                        currentTurn={agentActivity.currentTurn}
+                                        maxTurns={agentActivity.maxTurns}
+                                        actions={agentActivity.actions}
+                                        currentReasoning={agentActivity.currentReasoning}
+                                        error={agentActivity.error}
+                                        finalResponse={agentActivity.finalResponse}
+                                        screenshot={agentActivity.screenshot}
+                                        onCancel={cancelAgentTask}
+                                        onPause={pauseAgentTask}
+                                        onResume={resumeAgentTask}
+                                        onReset={resetAgent}
+                                    />
+                                </div>
+                            )}
                         </>
                     )}
 
@@ -341,7 +404,13 @@ export const Chat: React.FC = () => {
 
             {/* Input Area */}
             <div className="p-4">
-                <ChatInput onSend={sendMessage} disabled={isLoading} />
+                <ChatInput
+                    onSend={sendMessage}
+                    onAgentSend={handleAgentSend}
+                    disabled={isLoading || (agentActivity?.isRunning ?? false)}
+                    isAgentMode={isAgentMode}
+                    onAgentModeChange={setAgentMode}
+                />
             </div>
         </div>
     )

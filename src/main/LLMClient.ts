@@ -119,7 +119,7 @@ export class LLMClient {
 
       // Build user message content with screenshot first, then text
       const userContent: any[] = [];
-      
+
       // Add screenshot as the first part if available
       if (screenshot) {
         userContent.push({
@@ -127,7 +127,7 @@ export class LLMClient {
           image: screenshot,
         });
       }
-      
+
       // Add text content
       userContent.push({
         type: "text",
@@ -139,7 +139,7 @@ export class LLMClient {
         role: "user",
         content: userContent.length === 1 ? request.message : userContent,
       };
-      
+
       this.messages.push(userMessage);
 
       // Send updated messages to renderer
@@ -174,11 +174,13 @@ export class LLMClient {
     this.webContents.send("chat-messages-updated", this.messages);
   }
 
-  private async prepareMessagesWithContext(_request: ChatRequest): Promise<CoreMessage[]> {
+  private async prepareMessagesWithContext(
+    _request: ChatRequest
+  ): Promise<CoreMessage[]> {
     // Get page context from active tab
     let pageUrl: string | null = null;
     let pageText: string | null = null;
-    
+
     if (this.window) {
       const activeTab = this.window.activeTab;
       if (activeTab) {
@@ -201,7 +203,10 @@ export class LLMClient {
     return [systemMessage, ...this.messages];
   }
 
-  private buildSystemPrompt(url: string | null, pageText: string | null): string {
+  private buildSystemPrompt(
+    url: string | null,
+    pageText: string | null
+  ): string {
     const parts: string[] = [
       "You are a helpful AI assistant integrated into a web browser.",
       "You can analyze and discuss web pages with the user.",
@@ -264,7 +269,7 @@ export class LLMClient {
       role: "assistant",
       content: "",
     };
-    
+
     // Keep track of the index for updates
     const messageIndex = this.messages.length;
     this.messages.push(assistantMessage);
