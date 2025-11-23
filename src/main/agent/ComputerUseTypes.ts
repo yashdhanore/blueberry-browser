@@ -1,4 +1,4 @@
-export const COORDINATE_RANGE = 999;
+export const COORDINATE_RANGE = 1000;
 
 /**
  * Possible states of the agent during task execution
@@ -23,97 +23,6 @@ export interface PixelCoordinates {
 }
 
 /**
- * Base interface for all Gemini function call arguments
- */
-export interface GeminiBaseFunctionArgs {
-  safety_decision?: SafetyDecision;
-}
-
-/**
- * for navigate function
- */
-export interface NavigateArgs extends GeminiBaseFunctionArgs {
-  url: string;
-}
-
-/**
- * for click_at function
- */
-export interface ClickAtArgs extends GeminiBaseFunctionArgs {
-  x: number;
-  y: number;
-}
-
-/**
- * for type_text_at function
- */
-export interface TypeTextAtArgs extends GeminiBaseFunctionArgs {
-  x: number;
-  y: number;
-  text: string;
-}
-
-/**
- * Arguments for scroll_document function, positive = down and negative = up
- */
-export interface ScrollDocumentArgs extends GeminiBaseFunctionArgs {
-  scroll_amount: number;
-}
-
-/**
- * Arguments for scroll_at function
- */
-export interface ScrollAtArgs extends GeminiBaseFunctionArgs {
-  x: number;
-  y: number;
-  scroll_amount: number;
-}
-
-/**
- * Arguments for hover_at function
- */
-export interface HoverAtArgs extends GeminiBaseFunctionArgs {
-  x: number;
-  y: number;
-}
-
-/**
- * Arguments for key_combination function
- */
-export interface KeyCombinationArgs extends GeminiBaseFunctionArgs {
-  keys: string[]; // example ["Cmd", "c"]
-}
-
-export type GeminiFunctionArgs =
-  | NavigateArgs
-  | ClickAtArgs
-  | TypeTextAtArgs
-  | ScrollDocumentArgs
-  | ScrollAtArgs
-  | HoverAtArgs
-  | KeyCombinationArgs
-  | GeminiBaseFunctionArgs;
-
-export interface GeminiFunctionCall {
-  name: string;
-  args: GeminiFunctionArgs;
-}
-
-export interface SafetyDecision {
-  decision: "ALLOWED" | "REQUIRES_CONFIRMATION" | "BLOCKED";
-  reasoning?: string;
-  risk_level?: "LOW" | "MEDIUM" | "HIGH";
-}
-
-/**
- * User's response to a safety confirmation request
- */
-export interface SafetyConfirmationResponse {
-  approved: boolean;
-  remember?: boolean;
-}
-
-/**
  * Status of an executed action
  */
 export enum ActionStatus {
@@ -124,13 +33,13 @@ export enum ActionStatus {
   SKIPPED = "SKIPPED",
 }
 
-/**
- * Represents one action the agent has taken or will take
- */
 export interface AgentAction {
   id: string;
   timestamp: number;
-  functionCall: GeminiFunctionCall;
+  functionCall: {
+    name: string;
+    args: any;
+  };
   status: ActionStatus;
   reasoning?: string;
   result?: any;
@@ -148,7 +57,10 @@ export interface AgentMessagePart {
     mime_type: string;
     data: string;
   };
-  function_call?: GeminiFunctionCall;
+  function_call?: {
+    name: string;
+    args: any;
+  };
   function_response?: {
     name: string;
     response: any;
@@ -180,84 +92,13 @@ export interface TaskContext {
 }
 
 /**
- * Types of events sent to the UI
- */
-export enum AgentEventType {
-  TASK_STARTED = "TASK_STARTED",
-  TASK_COMPLETED = "TASK_COMPLETED",
-  TASK_FAILED = "TASK_FAILED",
-  STATE_CHANGED = "STATE_CHANGED",
-  ACTION_STARTED = "ACTION_STARTED",
-  ACTION_COMPLETED = "ACTION_COMPLETED",
-  ACTION_FAILED = "ACTION_FAILED",
-  REASONING_UPDATE = "REASONING_UPDATE",
-  SCREENSHOT_UPDATE = "SCREENSHOT_UPDATE",
-  SAFETY_CONFIRMATION_NEEDED = "SAFETY_CONFIRMATION_NEEDED",
-  PROGRESS_UPDATE = "PROGRESS_UPDATE",
-}
-
-/**
- * Event payload to UI
- */
-export interface AgentUIUpdate {
-  type: AgentEventType;
-  taskId: string;
-  timestamp: number;
-  data?: {
-    state?: AgentState;
-    action?: AgentAction;
-    reasoning?: string;
-    screenshot?: string; // Base64
-    url?: string;
-    error?: string;
-    finalResponse?: string;
-    safetyDecision?: SafetyDecision;
-    currentStep?: number;
-    totalSteps?: number;
-  };
-}
-
-/**
- * Result from executing an MCP tool
- */
-export interface MCPToolResult {
-  success: boolean;
-  data?: any;
-  error?: string;
-  screenshot?: Buffer;
-  url?: string;
-}
-
-export interface PageSnapshot {
-  url: string;
-  title: string;
-  elements: PageElement[];
-  timestamp: number;
-}
-
-/**
- * Simplified page element for context
- */
-export interface PageElement {
-  type: string;
-  role?: string; // ARIA role
-  text?: string; // Visible text
-  value?: string; // Input value
-  bounds?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  attributes?: Record<string, string>;
-}
-
-/**
  * Configuration for the agent
  */
 export interface AgentConfig {
-  geminiApiKey: string;
-  model?: string; // Default: gemini-2.5-computer-use-preview-10-2025
+  geminiApiKey?: string;
+  /**
+   * Max number of reasoning/action turns the agent is allowed to take.
+   */
   maxTurns?: number;
   screenshotQuality?: number;
   enableThinking?: boolean;
@@ -289,35 +130,6 @@ export enum AgentErrorCode {
   NETWORK_ERROR = "NETWORK_ERROR",
   INVALID_STATE = "INVALID_STATE",
   USER_CANCELLED = "USER_CANCELLED",
-}
-
-export interface PlanNextActionParams {
-  screenshot: Buffer;
-  currentUrl: string;
-  userGoal: string;
-  previousActions?: AgentAction[];
-  isInitial: boolean;
-}
-
-/**
- * Response from planning the next action
- */
-export interface PlanNextActionResponse {
-  reasoning: string;
-  functionCalls: GeminiFunctionCall[];
-  isComplete: boolean;
-  finalResponse?: string;
-}
-
-/**
- * Parameters for sending function response
- */
-export interface SendFunctionResponseParams {
-  functionName: string;
-  result: any;
-  newScreenshot: Buffer;
-  newUrl: string;
-  safetyAcknowledgement?: boolean;
 }
 
 export interface ToolResult {
