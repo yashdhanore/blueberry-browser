@@ -44,9 +44,6 @@ interface ChatContextType {
     clearChat: () => void
 
     // Agent actions
-    isAgentMode: boolean
-    setAgentMode: (enabled: boolean) => void
-    startAgentTask: (goal: string) => Promise<void>
     cancelAgentTask: () => Promise<void>
     pauseAgentTask: () => void
     resumeAgentTask: () => void
@@ -71,7 +68,6 @@ export const useChat = () => {
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [messages, setMessages] = useState<Message[]>([])
     const [isLoading, setIsLoading] = useState(false)
-    const [isAgentMode, setIsAgentMode] = useState(false)
     const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(null)
 
     // Load initial messages from main process
@@ -125,48 +121,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setMessages([])
         } catch (error) {
             console.error('Failed to clear chat:', error)
-        }
-    }, [])
-
-    const setAgentMode = useCallback((enabled: boolean) => {
-        setIsAgentMode(enabled)
-    }, [])
-
-    const startAgentTask = useCallback(async (goal: string) => {
-        try {
-            // Create agent activity in the chat
-            const activity: AgentActivity = {
-                id: `agent-${Date.now()}`,
-                type: 'agent-task',
-                goal,
-                isRunning: true,
-                isPaused: false,
-                currentTurn: 0,
-                maxTurns: 20,
-                actions: [],
-                currentReasoning: null,
-                error: null,
-                finalResponse: null,
-                screenshot: null,
-                timestamp: Date.now()
-            }
-            setAgentActivity(activity)
-
-            const result = await window.sidebarAPI.startAgent(goal)
-            if (!result.success) {
-                setAgentActivity(prev => prev ? {
-                    ...prev,
-                    isRunning: false,
-                    error: result.error || 'Failed to start agent'
-                } : null)
-            }
-        } catch (error) {
-            console.error('Failed to start agent:', error)
-            setAgentActivity(prev => prev ? {
-                ...prev,
-                isRunning: false,
-                error: error instanceof Error ? error.message : 'Unknown error'
-            } : null)
         }
     }, [])
 
@@ -249,12 +203,27 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.log('[ChatContext] Received agent update:', update.type, update.data)
 
             setAgentActivity(prev => {
-                if (!prev) return null
+                if (update.type === 'start') {
+                    return {
+                        id: `agent-${Date.now()}`,
+                        type: 'agent-task',
+                        goal: update.data.goal || 'Running agent task',
+                        isRunning: true,
+                        isPaused: false,
+                        currentTurn: 0,
+                        maxTurns: typeof update.data?.maxTurns === 'number' ? update.data.maxTurns : 20,
+                        actions: [],
+                        currentReasoning: null,
+                        error: null,
+                        finalResponse: null,
+                        screenshot: null,
+                        timestamp: Date.now()
+                    }
+                }
+
+                if (!prev) return prev
 
                 switch (update.type) {
-                    case 'start':
-                        return { ...prev, goal: update.data.goal, isRunning: true }
-
                     case 'turn':
                         return { ...prev, currentTurn: update.data.turn }
 
@@ -339,9 +308,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         agentActivity,
         sendMessage,
         clearChat,
-        isAgentMode,
-        setAgentMode,
-        startAgentTask,
         cancelAgentTask,
         pauseAgentTask,
         resumeAgentTask,

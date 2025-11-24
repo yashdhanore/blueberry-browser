@@ -5,6 +5,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import * as dotenv from "dotenv";
 import { join } from "path";
 import type { Window } from "./Window";
+import { AgentService } from "./agent/AgentService";
 
 // Load environment variables from .env file
 dotenv.config({ path: join(__dirname, "../../.env") });
@@ -19,6 +20,17 @@ interface StreamChunk {
   isComplete: boolean;
 }
 
+interface PageContext {
+  pageUrl: string | null;
+  pageText: string | null;
+}
+
+interface IntentClassification {
+  mode: "chat" | "agent";
+  confidence: number;
+  reason: string;
+}
+
 type LLMProvider = "openai" | "anthropic";
 
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
@@ -28,6 +40,7 @@ const DEFAULT_MODELS: Record<LLMProvider, string> = {
 
 const MAX_CONTEXT_LENGTH = 4000;
 const DEFAULT_TEMPERATURE = 0.7;
+const AGENT_TRIGGER_CONFIDENCE = 0.55;
 
 export class LLMClient {
   private readonly webContents: WebContents;
@@ -36,14 +49,20 @@ export class LLMClient {
   private readonly modelName: string;
   private readonly model: LanguageModel | null;
   private messages: CoreMessage[] = [];
+  private readonly agentService: AgentService;
 
   constructor(webContents: WebContents) {
     this.webContents = webContents;
     this.provider = this.getProvider();
     this.modelName = this.getModelName();
     this.model = this.initializeModel();
+    this.agentService = AgentService.getInstance();
 
     this.logInitializationStatus();
+
+    this.agentService.on("complete", (data) => this.handleAgentComplete(data));
+    this.agentService.on("agent-error", (data) => this.handleAgentError(data));
+    this.agentService.on("cancelled", () => this.handleAgentCancelled());
   }
 
   // Set the window reference after construction to avoid circular dependencies
@@ -145,6 +164,14 @@ export class LLMClient {
       // Send updated messages to renderer
       this.sendMessagesToRenderer();
 
+      const pageContext = await this.collectPageContext();
+      const intent = await this.classifyIntent(request.message, pageContext);
+
+      if (this.shouldRouteToAgent(intent)) {
+        await this.handleAgentRouting(request, intent);
+        return;
+      }
+
       if (!this.model) {
         this.sendErrorMessage(
           request.messageId,
@@ -153,7 +180,7 @@ export class LLMClient {
         return;
       }
 
-      const messages = await this.prepareMessagesWithContext(request);
+      const messages = await this.prepareMessagesWithContext(request, pageContext);
       await this.streamResponse(messages, request.messageId);
     } catch (error) {
       console.error("Error in LLM request:", error);
@@ -170,14 +197,107 @@ export class LLMClient {
     return this.messages;
   }
 
-  private sendMessagesToRenderer(): void {
-    this.webContents.send("chat-messages-updated", this.messages);
+  private shouldRouteToAgent(intent: IntentClassification): boolean {
+    return intent.mode === "agent" && intent.confidence >= AGENT_TRIGGER_CONFIDENCE;
   }
 
-  private async prepareMessagesWithContext(
-    _request: ChatRequest
-  ): Promise<CoreMessage[]> {
-    // Get page context from active tab
+  private async handleAgentRouting(
+    request: ChatRequest,
+    intent: IntentClassification
+  ): Promise<void> {
+    const acknowledgement =
+      "I'll take over the browser to handle that task and report back once it's done.";
+
+    const assistantMessage: CoreMessage = {
+      role: "assistant",
+      content: intent.reason
+        ? `${acknowledgement}\n\n_${intent.reason}_`
+        : acknowledgement,
+    };
+
+    this.messages.push(assistantMessage);
+    this.sendMessagesToRenderer();
+
+    const result = await this.agentService.startAgent(request.message);
+    if (!result.success) {
+      const failureMessage = `I couldn't start the agent: ${
+        result.error || "unknown error"
+      }.`;
+      this.messages.push({
+        role: "assistant",
+        content: failureMessage,
+      });
+      this.sendMessagesToRenderer();
+    }
+
+    this.sendStreamChunk(request.messageId, {
+      content: acknowledgement,
+      isComplete: true,
+    });
+  }
+
+  private async classifyIntent(
+    message: string,
+    pageContext: PageContext
+  ): Promise<IntentClassification> {
+    if (!this.model) {
+      return { mode: "chat", confidence: 0, reason: "LLM unavailable" };
+    }
+
+    const systemPrompt =
+      "You are a routing classifier for a browser assistant. " +
+      "Decide whether the assistant should stay in CHAT mode (pure conversation) or AGENT mode (take control of the browser). " +
+      'Respond with valid JSON: {"mode":"chat|agent","confidence":0-1,"reason":"short explanation"}. ' +
+      "Agent mode is required for actions like navigating, clicking, filling forms, uploading, downloading, or anything needing direct browser control. " +
+      "Chat mode is for answering questions, summarizing content, or reasoning without taking control.";
+
+    const userPromptParts = [`User message:\n${message}`];
+    if (pageContext.pageUrl) {
+      userPromptParts.push(`Currently viewed URL: ${pageContext.pageUrl}`);
+    }
+
+    const result = await streamText({
+      model: this.model,
+      temperature: 0,
+      maxRetries: 2,
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: userPromptParts.join("\n\n"),
+        },
+      ],
+    });
+
+    let raw = "";
+    for await (const chunk of result.textStream) {
+      raw += chunk;
+    }
+
+    return this.parseIntentClassification(raw);
+  }
+
+  private parseIntentClassification(text: string): IntentClassification {
+    try {
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start !== -1 && end !== -1) {
+        const jsonText = text.slice(start, end + 1);
+        const parsed = JSON.parse(jsonText);
+        const mode = parsed.mode === "agent" ? "agent" : "chat";
+        const confidence =
+          typeof parsed.confidence === "number" ? parsed.confidence : 0;
+        const reason =
+          typeof parsed.reason === "string" ? parsed.reason : "Routing by default.";
+        return { mode, confidence, reason };
+      }
+    } catch (error) {
+      console.warn("Failed to parse intent classification response:", error);
+    }
+    return { mode: "chat", confidence: 0, reason: "Failed to classify" };
+  }
+
+  private async collectPageContext(): Promise<PageContext> {
     let pageUrl: string | null = null;
     let pageText: string | null = null;
 
@@ -193,13 +313,54 @@ export class LLMClient {
       }
     }
 
-    // Build system message
+    return { pageUrl, pageText };
+  }
+
+  private handleAgentComplete(data: { finalResponse?: string; duration?: number }): void {
+    const durationSeconds =
+      typeof data?.duration === "number"
+        ? ` in ${Math.round(data.duration / 1000)}s`
+        : "";
+    const summary =
+      data?.finalResponse ||
+      "The autonomous agent finished the requested task.";
+    this.appendAssistantMessage(`Agent task completed${durationSeconds}: ${summary}`);
+  }
+
+  private handleAgentError(data: { error?: string }): void {
+    const errorMessage = data?.error || "Unknown error";
+    this.appendAssistantMessage(
+      `Agent task encountered an error: ${errorMessage}.`
+    );
+  }
+
+  private handleAgentCancelled(): void {
+    this.appendAssistantMessage("Agent task was cancelled.");
+  }
+
+  private appendAssistantMessage(content: string): void {
+    this.messages.push({
+      role: "assistant",
+      content,
+    });
+    this.sendMessagesToRenderer();
+  }
+
+  private sendMessagesToRenderer(): void {
+    this.webContents.send("chat-messages-updated", this.messages);
+  }
+
+  private async prepareMessagesWithContext(
+    _request: ChatRequest,
+    pageContext: PageContext
+  ): Promise<CoreMessage[]> {
+    const { pageUrl, pageText } = pageContext;
+
     const systemMessage: CoreMessage = {
       role: "system",
       content: this.buildSystemPrompt(pageUrl, pageText),
     };
 
-    // Include all messages in history (system + conversation)
     return [systemMessage, ...this.messages];
   }
 

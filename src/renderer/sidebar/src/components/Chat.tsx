@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { ArrowUp, Square, Sparkles, Plus, Bot } from 'lucide-react'
+import { ArrowUp, Plus } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
@@ -152,14 +152,11 @@ const LoadingIndicator: React.FC = () => {
     )
 }
 
-// Chat Input Component with pill design and agent toggle
+// Chat Input Component
 const ChatInput: React.FC<{
     onSend: (message: string) => void
-    onAgentSend: (goal: string) => void
     disabled: boolean
-    isAgentMode: boolean
-    onAgentModeChange: (enabled: boolean) => void
-}> = ({ onSend, onAgentSend, disabled, isAgentMode, onAgentModeChange }) => {
+}> = ({ onSend, disabled }) => {
     const [value, setValue] = useState('')
     const [isFocused, setIsFocused] = useState(false)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -176,11 +173,7 @@ const ChatInput: React.FC<{
 
     const handleSubmit = () => {
         if (value.trim() && !disabled) {
-            if (isAgentMode) {
-                onAgentSend(value.trim())
-            } else {
-                onSend(value.trim())
-            }
+            onSend(value.trim())
             setValue('')
             // Reset textarea height
             if (textareaRef.current) {
@@ -202,22 +195,6 @@ const ChatInput: React.FC<{
             "shadow-chat animate-spring-scale outline-none transition-all duration-200",
             isFocused ? "border-primary/20 dark:border-primary/30" : "border-border"
         )}>
-            {/* Agent Mode Toggle */}
-            <div className="px-3 pb-2">
-                <button
-                    onClick={() => onAgentModeChange(!isAgentMode)}
-                    className={cn(
-                        "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-all",
-                        isAgentMode
-                            ? "bg-primary/10 text-primary border border-primary/20"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    )}
-                >
-                    <Bot className="size-3" />
-                    <span className="font-medium">{isAgentMode ? 'Agent Mode' : 'Chat Mode'}</span>
-                </button>
-            </div>
-
             {/* Input Area */}
             <div className="w-full px-3 py-2">
                 <div className="w-full flex items-start gap-3">
@@ -229,7 +206,7 @@ const ChatInput: React.FC<{
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
                             onKeyDown={handleKeyDown}
-                            placeholder={isAgentMode ? "What task should the agent perform?" : "Send a message..."}
+                            placeholder="Send a message..."
                             className="w-full resize-none outline-none bg-transparent
                                      text-foreground placeholder:text-muted-foreground
                                      min-h-[24px] max-h-[200px]"
@@ -249,7 +226,7 @@ const ChatInput: React.FC<{
                     className={cn(
                         "size-9 rounded-full flex items-center justify-center",
                         "transition-all duration-200",
-                        isAgentMode ? "bg-primary text-primary-foreground" : "bg-primary text-primary-foreground",
+                        "bg-primary text-primary-foreground",
                         "hover:opacity-80 disabled:opacity-50"
                     )}
                 >
@@ -294,19 +271,12 @@ export const Chat: React.FC = () => {
         agentActivity,
         sendMessage,
         clearChat,
-        isAgentMode,
-        setAgentMode,
-        startAgentTask,
         cancelAgentTask,
         pauseAgentTask,
         resumeAgentTask,
         resetAgent
     } = useChat()
     const scrollRef = useAutoScroll(messages, agentActivity)
-
-    const handleAgentSend = (goal: string) => {
-        startAgentTask(goal)
-    }
 
     // Group messages into conversation turns
     const conversationTurns: ConversationTurn[] = []
@@ -406,10 +376,7 @@ export const Chat: React.FC = () => {
             <div className="p-4">
                 <ChatInput
                     onSend={sendMessage}
-                    onAgentSend={handleAgentSend}
                     disabled={isLoading || (agentActivity?.isRunning ?? false)}
-                    isAgentMode={isAgentMode}
-                    onAgentModeChange={setAgentMode}
                 />
             </div>
         </div>

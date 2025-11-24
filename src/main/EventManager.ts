@@ -1,16 +1,18 @@
 import { ipcMain, WebContents } from "electron";
 import type { Window } from "./Window";
-import { AgentOrchestrator } from "./agent/AgentOrchestrator";
 import { ComputerUseActions } from "./agent/ComputerUseActions";
+import { AgentService } from "./agent/AgentService";
 
 export class EventManager {
   private mainWindow: Window;
-  private orchestrator: AgentOrchestrator | null = null;
   private computerUseActions: ComputerUseActions;
+  private agentService: AgentService;
 
   constructor(mainWindow: Window) {
     this.mainWindow = mainWindow;
     this.computerUseActions = new ComputerUseActions(this.mainWindow);
+    this.agentService = AgentService.getInstance();
+    this.agentService.setWindow(this.mainWindow);
     this.setupEventHandlers();
   }
 
@@ -276,91 +278,26 @@ export class EventManager {
   private handleAgentEvents(): void {
     ipcMain.handle("agent-start", async (_, goal: string) => {
       console.log("agent-start received:", goal);
-
-      if (this.orchestrator && this.orchestrator.getContext().isRunning()) {
-        return { success: false, error: "Agent already running" };
-      }
-
-      this.orchestrator = new AgentOrchestrator(this.mainWindow);
-      this.setupOrchestratorListeners();
-
-      this.orchestrator.startTask(goal).catch((err) => {
-        console.error("Agent error:", err);
-      });
-
-      return { success: true };
+      return await this.agentService.startAgent(goal);
     });
 
     ipcMain.handle("agent-cancel", async () => {
       console.log("agent-cancel received");
-      if (this.orchestrator) {
-        await this.orchestrator.cancelTask();
-        this.orchestrator = null;
-      }
+      await this.agentService.cancelAgent();
     });
 
     ipcMain.handle("agent-pause", () => {
       console.log("agent-pause received");
-      this.orchestrator?.pauseTask();
+      this.agentService.pauseAgent();
     });
 
-    ipcMain.handle("agent-resume", () => {
+    ipcMain.handle("agent-resume", async () => {
       console.log("agent-resume received");
-      this.orchestrator?.resumeTask();
+      await this.agentService.resumeAgent();
     });
 
     ipcMain.handle("agent-get-state", () => {
-      if (!this.orchestrator) return null;
-
-      const context = this.orchestrator.getContext();
-      const ctx = context.getContext();
-
-      return {
-        isRunning: context.isRunning(),
-        isPaused: context.isPaused(),
-        goal: ctx.userGoal,
-        currentTurn: context.getCurrentTurn(),
-        maxTurns: context.getConfig().maxTurns,
-        actions: ctx.actions.map((a) => ({
-          id: a.id,
-          type: a.functionCall.name,
-          args: a.functionCall.args,
-          status: a.status,
-          timestamp: a.timestamp,
-        })),
-        error: ctx.error || null,
-      };
-    });
-  }
-
-  private setupOrchestratorListeners(): void {
-    if (!this.orchestrator) return;
-
-    const events = [
-      "start",
-      "turn",
-      "action",
-      "actionComplete",
-      "reasoning",
-      "complete",
-      "error",
-      "cancelled",
-      "paused",
-      "resumed",
-    ];
-
-    const logEvents = new Set(["start", "complete", "error", "cancelled"]);
-
-    events.forEach((event) => {
-      this.orchestrator!.on(event, (data) => {
-        if (logEvents.has(event)) {
-          console.log(`[Agent] ${event}:`, JSON.stringify(data).slice(0, 100));
-        }
-        this.mainWindow.sidebar.view.webContents.send("agent-update", {
-          type: event,
-          data,
-        });
-      });
+      return this.agentService.getAgentState();
     });
   }
 

@@ -3,7 +3,7 @@ import { electronApp } from "@electron-toolkit/utils";
 import { Window } from "./Window";
 import { AppMenu } from "./Menu";
 import { EventManager } from "./EventManager";
-import { StagehandService } from "./agent/StagehandService";
+import { AgentService } from "./agent/AgentService";
 
 let mainWindow: Window | null = null;
 let eventManager: EventManager | null = null;
@@ -49,7 +49,7 @@ app.on("window-all-closed", () => {
     menu = null;
   }
 
-  void StagehandService.getInstance().shutdown();
+  void AgentService.getInstance().shutdown();
 
   if (process.platform !== "darwin") {
     app.quit();
