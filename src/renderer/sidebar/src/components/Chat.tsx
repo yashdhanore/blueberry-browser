@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -282,11 +282,49 @@ export const Chat: React.FC = () => {
         lastItem?.type === 'message' &&
         lastItem.message.role === 'user'
 
+    const agentNarrativeCounts = useMemo(() => {
+        const counts = new Map<string, number>()
+        for (const item of conversationItems) {
+            if (item.type !== 'agent-activity') continue
+            if (item.activity.isRunning) continue
+
+            const finalResponse = item.activity.finalResponse?.trim()
+            const error = item.activity.error?.trim()
+
+            if (finalResponse) {
+                counts.set(finalResponse, (counts.get(finalResponse) ?? 0) + 1)
+            }
+
+            if (error) {
+                counts.set(error, (counts.get(error) ?? 0) + 1)
+            }
+        }
+        return counts
+    }, [conversationItems])
+
+    const narrativeCounts = new Map(agentNarrativeCounts)
+
+    const shouldHideAssistantNarrative = (content: string) => {
+        const normalized = content.trim()
+        if (!normalized) return false
+        const remaining = narrativeCounts.get(normalized)
+        if (!remaining) return false
+        if (remaining <= 1) {
+            narrativeCounts.delete(normalized)
+        } else {
+            narrativeCounts.set(normalized, remaining - 1)
+        }
+        return true
+    }
+
     const renderedConversation: React.ReactNode[] = []
     for (let i = 0; i < conversationItems.length; i++) {
         const item = conversationItems[i]
 
         if (item.type === 'message') {
+            if (item.message.role === 'assistant' && shouldHideAssistantNarrative(item.message.content)) {
+                continue
+            }
             if (item.message.role === 'user') {
                 const turn: ConversationTurn = { user: item.message }
                 const next = conversationItems[i + 1]
