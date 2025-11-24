@@ -17,13 +17,12 @@ interface Message {
 }
 
 // Auto-scroll hook
-const useAutoScroll = (messages: Message[], agentActivity: any) => {
+const useAutoScroll = (count: number) => {
     const scrollRef = useRef<HTMLDivElement>(null)
     const prevCount = useRef(0)
 
     useLayoutEffect(() => {
-        const currentCount = messages.length + (agentActivity ? 1 : 0)
-        if (currentCount > prevCount.current) {
+        if (count > prevCount.current) {
             setTimeout(() => {
                 scrollRef.current?.scrollIntoView({
                     behavior: 'smooth',
@@ -31,8 +30,8 @@ const useAutoScroll = (messages: Message[], agentActivity: any) => {
                 })
             }, 100)
         }
-        prevCount.current = currentCount
-    }, [messages.length, agentActivity])
+        prevCount.current = count
+    }, [count])
 
     return scrollRef
 }
@@ -266,38 +265,75 @@ const ConversationTurnComponent: React.FC<{
 // Main Chat Component
 export const Chat: React.FC = () => {
     const {
-        messages,
+        conversationItems,
         isLoading,
-        agentActivity,
+        isAgentBusy,
         sendMessage,
         clearChat,
         cancelAgentTask,
         pauseAgentTask,
         resumeAgentTask,
-        resetAgent
+        dismissAgentActivity
     } = useChat()
-    const scrollRef = useAutoScroll(messages, agentActivity)
+    const scrollRef = useAutoScroll(conversationItems.length)
 
-    // Group messages into conversation turns
-    const conversationTurns: ConversationTurn[] = []
-    for (let i = 0; i < messages.length; i++) {
-        if (messages[i].role === 'user') {
-            const turn: ConversationTurn = { user: messages[i] }
-            if (messages[i + 1]?.role === 'assistant') {
-                turn.assistant = messages[i + 1]
-                i++ // Skip next message since we've paired it
-            }
-            conversationTurns.push(turn)
-        } else if (messages[i].role === 'assistant' &&
-            (i === 0 || messages[i - 1]?.role !== 'user')) {
-            // Handle standalone assistant messages
-            conversationTurns.push({ assistant: messages[i] })
-        }
-    }
-
-    // Check if we need to show loading after the last turn
+    const lastItem = conversationItems[conversationItems.length - 1]
     const showLoadingAfterLastTurn = isLoading &&
-        messages[messages.length - 1]?.role === 'user'
+        lastItem?.type === 'message' &&
+        lastItem.message.role === 'user'
+
+    const renderedConversation: React.ReactNode[] = []
+    for (let i = 0; i < conversationItems.length; i++) {
+        const item = conversationItems[i]
+
+        if (item.type === 'message') {
+            if (item.message.role === 'user') {
+                const turn: ConversationTurn = { user: item.message }
+                const next = conversationItems[i + 1]
+                if (next?.type === 'message' && next.message.role === 'assistant') {
+                    turn.assistant = next.message
+                    i++
+                }
+                const shouldShowLoading = showLoadingAfterLastTurn && !turn.assistant && i === conversationItems.length - 1
+                renderedConversation.push(
+                    <ConversationTurnComponent
+                        key={`turn-${turn.user?.id ?? turn.assistant?.id ?? i}`}
+                        turn={turn}
+                        isLoading={shouldShowLoading}
+                    />
+                )
+            } else {
+                renderedConversation.push(
+                    <ConversationTurnComponent
+                        key={`turn-${item.id}`}
+                        turn={{ assistant: item.message }}
+                    />
+                )
+            }
+            continue
+        }
+
+        renderedConversation.push(
+            <div className="pt-12" key={item.id}>
+                <AgentActivityCard
+                    goal={item.activity.goal}
+                    isRunning={item.activity.isRunning}
+                    isPaused={item.activity.isPaused}
+                    currentTurn={item.activity.currentTurn}
+                    maxTurns={item.activity.maxTurns}
+                    actions={item.activity.actions}
+                    currentReasoning={item.activity.currentReasoning}
+                    error={item.activity.error}
+                    finalResponse={item.activity.finalResponse}
+                    screenshot={item.activity.screenshot}
+                    onCancel={cancelAgentTask}
+                    onPause={pauseAgentTask}
+                    onResume={resumeAgentTask}
+                    onReset={() => dismissAgentActivity(item.id)}
+                />
+            </div>
+        )
+    }
 
     return (
         <div className="flex flex-col h-full bg-background">
@@ -305,7 +341,7 @@ export const Chat: React.FC = () => {
             <div className="flex-1 overflow-y-auto">
                 <div className="h-8 max-w-3xl mx-auto px-4">
                     {/* New Chat Button - Floating */}
-                    {messages.length > 0 && (
+                    {conversationItems.some(item => item.type === 'message') && (
                         <Button
                             onClick={clearChat}
                             title="Start new chat"
@@ -319,7 +355,7 @@ export const Chat: React.FC = () => {
 
                 <div className="pb-4 relative max-w-3xl mx-auto px-4">
 
-                    {messages.length === 0 && !agentActivity ? (
+                    {conversationItems.length === 0 ? (
                         // Empty State
                         <div className="flex items-center justify-center h-full min-h-[400px]">
                             <div className="text-center animate-fade-in max-w-md mx-auto gap-2 flex flex-col">
@@ -331,39 +367,7 @@ export const Chat: React.FC = () => {
                         </div>
                     ) : (
                         <>
-                            {/* Render conversation turns */}
-                            {conversationTurns.map((turn, index) => (
-                                <ConversationTurnComponent
-                                    key={`turn-${index}`}
-                                    turn={turn}
-                                    isLoading={
-                                        showLoadingAfterLastTurn &&
-                                        index === conversationTurns.length - 1
-                                    }
-                                />
-                            ))}
-
-                            {/* Agent Activity Card */}
-                            {agentActivity && (
-                                <div className="pt-12">
-                                    <AgentActivityCard
-                                        goal={agentActivity.goal}
-                                        isRunning={agentActivity.isRunning}
-                                        isPaused={agentActivity.isPaused}
-                                        currentTurn={agentActivity.currentTurn}
-                                        maxTurns={agentActivity.maxTurns}
-                                        actions={agentActivity.actions}
-                                        currentReasoning={agentActivity.currentReasoning}
-                                        error={agentActivity.error}
-                                        finalResponse={agentActivity.finalResponse}
-                                        screenshot={agentActivity.screenshot}
-                                        onCancel={cancelAgentTask}
-                                        onPause={pauseAgentTask}
-                                        onResume={resumeAgentTask}
-                                        onReset={resetAgent}
-                                    />
-                                </div>
-                            )}
+                            {renderedConversation}
                         </>
                     )}
 
@@ -376,7 +380,7 @@ export const Chat: React.FC = () => {
             <div className="p-4">
                 <ChatInput
                     onSend={sendMessage}
-                    disabled={isLoading || (agentActivity?.isRunning ?? false)}
+                    disabled={isLoading || isAgentBusy}
                 />
             </div>
         </div>

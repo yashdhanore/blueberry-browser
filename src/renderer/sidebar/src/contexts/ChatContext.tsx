@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 
 interface Message {
     id: string
@@ -34,10 +34,26 @@ interface AgentActivity {
     timestamp: number
 }
 
+interface ConversationMessageItem {
+    id: string
+    type: 'message'
+    message: Message
+}
+
+interface ConversationAgentItem {
+    id: string
+    type: 'agent-activity'
+    activity: AgentActivity
+}
+
+export type ConversationItem = ConversationMessageItem | ConversationAgentItem
+
 interface ChatContextType {
     messages: Message[]
     isLoading: boolean
-    agentActivity: AgentActivity | null
+    conversationItems: ConversationItem[]
+    activeAgentActivity: AgentActivity | null
+    isAgentBusy: boolean
 
     // Chat actions
     sendMessage: (content: string) => Promise<void>
@@ -47,7 +63,7 @@ interface ChatContextType {
     cancelAgentTask: () => Promise<void>
     pauseAgentTask: () => void
     resumeAgentTask: () => void
-    resetAgent: () => void
+    dismissAgentActivity: (activityId: string) => void
 
     // Page content access
     getPageContent: () => Promise<string | null>
@@ -68,7 +84,57 @@ export const useChat = () => {
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [messages, setMessages] = useState<Message[]>([])
     const [isLoading, setIsLoading] = useState(false)
-    const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(null)
+    const [conversationItems, setConversationItems] = useState<ConversationItem[]>([])
+    const [activeAgentItemId, setActiveAgentItemIdState] = useState<string | null>(null)
+    const activeAgentItemIdRef = useRef<string | null>(null)
+
+    const updateActiveAgentItemId = useCallback((id: string | null) => {
+        activeAgentItemIdRef.current = id
+        setActiveAgentItemIdState(id)
+    }, [])
+
+    const appendMessagesToConversation = useCallback((newMessages: Message[]) => {
+        if (newMessages.length === 0) return
+        setConversationItems(prev => {
+            let changed = false
+            const newMessageMap = new Map(newMessages.map(msg => [msg.id, msg]))
+            const consumedIds = new Set<string>()
+
+            const updated = prev.map(item => {
+                if (item.type !== 'message') return item
+
+                const latest = newMessageMap.get(item.message.id)
+                if (!latest) return item
+
+                consumedIds.add(latest.id)
+
+                if (
+                    latest.content !== item.message.content ||
+                    latest.role !== item.message.role ||
+                    latest.isStreaming !== item.message.isStreaming
+                ) {
+                    changed = true
+                    return { ...item, message: latest }
+                }
+
+                return item
+            })
+
+            const additions: ConversationItem[] = newMessages
+                .filter(msg => !consumedIds.has(msg.id))
+                .map(msg => ({
+                    id: msg.id,
+                    type: 'message',
+                    message: msg
+                }))
+
+            if (!changed && additions.length === 0) {
+                return prev
+            }
+
+            return [...updated, ...additions]
+        })
+    }, [])
 
     // Load initial messages from main process
     useEffect(() => {
@@ -87,13 +153,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         isStreaming: false
                     }))
                     setMessages(convertedMessages)
+                    appendMessagesToConversation(convertedMessages)
                 }
             } catch (error) {
                 console.error('Failed to load messages:', error)
             }
         }
         loadMessages()
-    }, [])
+    }, [appendMessagesToConversation])
 
     const sendMessage = useCallback(async (content: string) => {
         setIsLoading(true)
@@ -119,33 +186,58 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             await window.sidebarAPI.clearChat()
             setMessages([])
+            setConversationItems([])
+            updateActiveAgentItemId(null)
         } catch (error) {
             console.error('Failed to clear chat:', error)
         }
+    }, [updateActiveAgentItemId])
+
+    const applyAgentActivityUpdate = useCallback((updater: (activity: AgentActivity) => AgentActivity, targetId?: string) => {
+        const resolvedId = targetId ?? activeAgentItemIdRef.current
+        if (!resolvedId) return
+
+        setConversationItems(prev =>
+            prev.map(item =>
+                item.type === 'agent-activity' && item.id === resolvedId
+                    ? { ...item, activity: updater(item.activity) }
+                    : item
+            )
+        )
     }, [])
 
     const cancelAgentTask = useCallback(async () => {
         try {
             await window.sidebarAPI.cancelAgent()
-            setAgentActivity(prev => prev ? { ...prev, isRunning: false, isPaused: false } : null)
+            applyAgentActivityUpdate(activity => ({
+                ...activity,
+                isRunning: false,
+                isPaused: false
+            }))
+            updateActiveAgentItemId(null)
         } catch (error) {
             console.error('Failed to cancel agent:', error)
         }
-    }, [])
+    }, [applyAgentActivityUpdate, updateActiveAgentItemId])
 
     const pauseAgentTask = useCallback(() => {
         window.sidebarAPI.pauseAgent()
-        setAgentActivity(prev => prev ? { ...prev, isPaused: true } : null)
-    }, [])
+        applyAgentActivityUpdate(activity => ({ ...activity, isPaused: true }))
+    }, [applyAgentActivityUpdate])
 
     const resumeAgentTask = useCallback(() => {
         window.sidebarAPI.resumeAgent()
-        setAgentActivity(prev => prev ? { ...prev, isPaused: false } : null)
-    }, [])
+        applyAgentActivityUpdate(activity => ({ ...activity, isPaused: false }))
+    }, [applyAgentActivityUpdate])
 
-    const resetAgent = useCallback(() => {
-        setAgentActivity(null)
-    }, [])
+    const dismissAgentActivity = useCallback((activityId: string) => {
+        setConversationItems(prev => prev.filter(item =>
+            !(item.type === 'agent-activity' && item.id === activityId)
+        ))
+        if (activeAgentItemIdRef.current === activityId) {
+            updateActiveAgentItemId(null)
+        }
+    }, [updateActiveAgentItemId])
 
     const getPageContent = useCallback(async () => {
         try {
@@ -185,7 +277,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Listen for message updates from main process
         const handleMessagesUpdated = (updatedMessages: any[]) => {
-            // Convert CoreMessage format to our frontend Message format
             const convertedMessages = updatedMessages.map((msg: any, index: number) => ({
                 id: `msg-${index}`,
                 role: msg.role,
@@ -196,15 +287,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 isStreaming: false
             }))
             setMessages(convertedMessages)
+            appendMessagesToConversation(convertedMessages)
         }
 
         // Listen for agent updates
         const handleAgentUpdate = (update: { type: string; data: any }) => {
             console.log('[ChatContext] Received agent update:', update.type, update.data)
 
-            setAgentActivity(prev => {
-                if (update.type === 'start') {
-                    return {
+            switch (update.type) {
+                case 'start': {
+                    const activity: AgentActivity = {
                         id: `agent-${Date.now()}`,
                         type: 'agent-task',
                         goal: update.data.goal || 'Running agent task',
@@ -219,76 +311,96 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         screenshot: null,
                         timestamp: Date.now()
                     }
+                    const activityId = `agent-activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+                    updateActiveAgentItemId(activityId)
+                    setConversationItems(prev => [...prev, { id: activityId, type: 'agent-activity', activity }])
+                    break
                 }
 
-                if (!prev) return prev
+                case 'turn':
+                    applyAgentActivityUpdate(activity => ({ ...activity, currentTurn: update.data.turn }))
+                    break
 
-                switch (update.type) {
-                    case 'turn':
-                        return { ...prev, currentTurn: update.data.turn }
+                case 'reasoning':
+                    applyAgentActivityUpdate(activity => ({ ...activity, currentReasoning: update.data.reasoning }))
+                    break
 
-                    case 'reasoning':
-                        return { ...prev, currentReasoning: update.data.reasoning }
+                case 'screenshot':
+                    applyAgentActivityUpdate(activity => ({ ...activity, screenshot: update.data.screenshot || null }))
+                    break
 
-                    case 'screenshot':
-                        return { ...prev, screenshot: update.data.screenshot || null }
+                case 'action':
+                    applyAgentActivityUpdate(activity => ({
+                        ...activity,
+                        actions: [
+                            ...activity.actions,
+                            {
+                                id: `action-${Date.now()}-${Math.random()}`,
+                                type: update.data.name,
+                                args: update.data.args,
+                                status: 'pending',
+                                timestamp: Date.now()
+                            }
+                        ]
+                    }))
+                    break
 
-                    case 'action':
-                        return {
-                            ...prev,
-                            actions: [
-                                ...prev.actions,
-                                {
-                                    id: `action-${Date.now()}-${Math.random()}`,
-                                    type: update.data.name,
-                                    args: update.data.args,
-                                    status: 'pending',
-                                    timestamp: Date.now(),
+                case 'actionComplete':
+                    applyAgentActivityUpdate(activity => ({
+                        ...activity,
+                        actions: activity.actions.map((action, index) =>
+                            index === activity.actions.length - 1 && action.status === 'pending'
+                                ? {
+                                    ...action,
+                                    status: update.data.success ? 'completed' : 'failed',
+                                    result: update.data.result
                                 }
-                            ]
-                        }
+                                : action
+                        )
+                    }))
+                    break
 
-                    case 'actionComplete':
-                        return {
-                            ...prev,
-                            actions: prev.actions.map((action, index) =>
-                                index === prev.actions.length - 1 && action.status === 'pending'
-                                    ? {
-                                        ...action,
-                                        status: update.data.success ? 'completed' : 'failed',
-                                        result: update.data.result
-                                    }
-                                    : action
-                            )
-                        }
+                case 'complete':
+                    applyAgentActivityUpdate(activity => ({
+                        ...activity,
+                        isRunning: false,
+                        finalResponse: update.data.finalResponse || 'Task completed successfully',
+                        currentReasoning: null
+                    }))
+                    updateActiveAgentItemId(null)
+                    break
 
-                    case 'complete':
-                        return {
-                            ...prev,
-                            isRunning: false,
-                            finalResponse: update.data.finalResponse || 'Task completed successfully'
-                        }
+                case 'error':
+                    applyAgentActivityUpdate(activity => ({
+                        ...activity,
+                        isRunning: false,
+                        error: update.data.error,
+                        currentReasoning: null
+                    }))
+                    updateActiveAgentItemId(null)
+                    break
 
-                    case 'error':
-                        return {
-                            ...prev,
-                            isRunning: false,
-                            error: update.data.error
-                        }
+                case 'cancelled':
+                    applyAgentActivityUpdate(activity => ({
+                        ...activity,
+                        isRunning: false,
+                        isPaused: false,
+                        currentReasoning: null
+                    }))
+                    updateActiveAgentItemId(null)
+                    break
 
-                    case 'cancelled':
-                        return { ...prev, isRunning: false, isPaused: false }
+                case 'paused':
+                    applyAgentActivityUpdate(activity => ({ ...activity, isPaused: true }))
+                    break
 
-                    case 'paused':
-                        return { ...prev, isPaused: true }
+                case 'resumed':
+                    applyAgentActivityUpdate(activity => ({ ...activity, isPaused: false }))
+                    break
 
-                    case 'resumed':
-                        return { ...prev, isPaused: false }
-
-                    default:
-                        return prev
-                }
-            })
+                default:
+                    break
+            }
         }
 
         window.sidebarAPI.onChatResponse(handleChatResponse)
@@ -300,18 +412,28 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             window.sidebarAPI.removeMessagesUpdatedListener()
             window.sidebarAPI.removeAgentUpdateListener()
         }
-    }, [])
+    }, [appendMessagesToConversation, updateActiveAgentItemId])
+
+    const activeAgentActivity = useMemo(() => {
+        if (!activeAgentItemId) return null
+        const entry = conversationItems.find(item => item.type === 'agent-activity' && item.id === activeAgentItemId) as ConversationAgentItem | undefined
+        return entry?.activity ?? null
+    }, [activeAgentItemId, conversationItems])
+
+    const isAgentBusy = !!(activeAgentActivity && activeAgentActivity.isRunning)
 
     const value: ChatContextType = {
         messages,
         isLoading,
-        agentActivity,
+        conversationItems,
+        activeAgentActivity,
+        isAgentBusy,
         sendMessage,
         clearChat,
         cancelAgentTask,
         pauseAgentTask,
         resumeAgentTask,
-        resetAgent,
+        dismissAgentActivity,
         getPageContent,
         getPageText,
         getCurrentUrl
