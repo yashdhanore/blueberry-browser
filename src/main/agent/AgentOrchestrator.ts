@@ -13,23 +13,27 @@ import {
   AgentError,
   AgentErrorCode,
 } from "./ComputerUseTypes";
-import { StagehandService } from "./StagehandService";
 import { createLocatorTools } from "./LocatorTools";
+
+interface StagehandProvider {
+  getStagehand(): Promise<any>;
+  getPageForActiveTab(window: Window): Promise<any>;
+}
 
 export class AgentOrchestrator extends EventEmitter {
   private window: Window;
   private tools: ComputerUseActions;
   private context: ContextManager;
-  private stagehandService: StagehandService;
+  private stagehandService: StagehandProvider;
   private isRunning: boolean = false;
 
-  constructor(window: Window, _geminiApiKey?: string) {
+  constructor(window: Window, stagehandService: StagehandProvider) {
     super();
 
     this.window = window;
     this.tools = new ComputerUseActions(window);
     this.context = new ContextManager();
-    this.stagehandService = StagehandService.getInstance();
+    this.stagehandService = stagehandService;
     this.setupContextForwarding();
   }
 

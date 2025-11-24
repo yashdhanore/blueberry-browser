@@ -1,5 +1,5 @@
 import { Window } from "../Window";
-import { StagehandService } from "./StagehandService";
+import { AgentService } from "./AgentService";
 import {
   COORDINATE_RANGE,
   ScrollAtParams,
@@ -9,11 +9,11 @@ import {
 
 export class ComputerUseActions {
   private window: Window;
-  private stagehandService: StagehandService;
+  private stagehandService: AgentService;
 
   constructor(window: Window) {
     this.window = window;
-    this.stagehandService = StagehandService.getInstance();
+    this.stagehandService = AgentService.getInstance();
   }
 
   private async getStagehandPage() {
