@@ -1,12 +1,14 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { ArrowUp, Plus } from 'lucide-react'
+import { ArrowUp, Plus, RefreshCcw } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
 import { AgentActivityCard } from './AgentActivityCard'
+
+const SMART_SUGGESTION_COUNT = 3
 
 interface Message {
     id: string
@@ -60,6 +62,7 @@ const StreamingText: React.FC<{ content: string }> = ({ content }) => {
             }, 10)
             return () => clearTimeout(timer)
         }
+        return undefined
     }, [content, currentIndex])
 
     return (
@@ -147,6 +150,89 @@ const LoadingIndicator: React.FC = () => {
             isVisible ? "scale-100" : "scale-0"
         )}>
             ...
+        </div>
+    )
+}
+
+// Smart Suggestions Component
+const SmartSuggestions: React.FC<{
+    suggestions: string[]
+    isLoading: boolean
+    error: string | null
+    disabled: boolean
+    onSelect: (suggestion: string) => void
+    onRefresh: () => void
+    collapsed: boolean
+    onToggleCollapsed: () => void
+}> = ({ suggestions, isLoading, error, disabled, onSelect, onRefresh, collapsed, onToggleCollapsed }) => {
+    const placeholderPills = Array.from({ length: SMART_SUGGESTION_COUNT }).map((_, index) => (
+        <div
+            key={`placeholder-${index}`}
+            className="h-8 w-28 rounded-full bg-muted/70 dark:bg-muted/40 animate-pulse"
+        />
+    ))
+
+    return (
+        <div className="w-full rounded-3xl border border-border bg-secondary/30 dark:bg-secondary/50 p-3">
+            <div className="flex items-center justify-between text-xs text-muted-foreground gap-2">
+                <span>Smart suggestions</span>
+                <div className="flex items-center gap-1.5">
+                    <button
+                        type="button"
+                        onClick={onRefresh}
+                        disabled={isLoading}
+                        className={cn(
+                            "p-1 rounded-full hover:bg-muted transition-colors",
+                            isLoading && "text-muted-foreground/60 cursor-not-allowed"
+                        )}
+                        aria-label="Refresh smart suggestions"
+                    >
+                        <RefreshCcw className={cn("size-4", isLoading && "animate-spin")} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onToggleCollapsed}
+                        className="px-2 py-1 rounded-full border border-border hover:border-primary transition-colors text-[11px]"
+                    >
+                        {collapsed ? 'Show' : 'Hide'}
+                    </button>
+                </div>
+            </div>
+
+            {error && !collapsed && (
+                <p className="mt-2 text-[11px] text-destructive">
+                    {error}
+                </p>
+            )}
+
+            {collapsed ? (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                    Suggestions hidden. Tap Show to expand.
+                </p>
+            ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                    {isLoading && suggestions.length === 0 ? (
+                        placeholderPills
+                    ) : (
+                        suggestions.map((suggestion) => (
+                            <button
+                                key={suggestion}
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => onSelect(suggestion)}
+                                className={cn(
+                                    "px-4 py-1.5 rounded-full border text-xs transition-all",
+                                    "bg-background/70 dark:bg-background/30 border-border",
+                                    "hover:border-primary hover:text-primary hover:bg-primary/5",
+                                    disabled && "opacity-50 cursor-not-allowed hover:border-border"
+                                )}
+                            >
+                                {suggestion}
+                            </button>
+                        ))
+                    )}
+                </div>
+            )}
         </div>
     )
 }
@@ -273,9 +359,18 @@ export const Chat: React.FC = () => {
         cancelAgentTask,
         pauseAgentTask,
         resumeAgentTask,
-        dismissAgentActivity
+        dismissAgentActivity,
+        getCurrentUrl
     } = useChat()
     const scrollRef = useAutoScroll(conversationItems.length)
+    const [suggestions, setSuggestions] = useState<string[]>([])
+    const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false)
+    const [suggestionsError, setSuggestionsError] = useState<string | null>(null)
+    const fetchPromiseRef = useRef<Promise<void> | null>(null)
+    const hasFetchedSuggestionsRef = useRef(false)
+    const currentUrlRef = useRef<string | null>(null)
+    const assistantKeyRef = useRef<string>('initial')
+    const [areSuggestionsCollapsed, setAreSuggestionsCollapsed] = useState(false)
 
     const lastItem = conversationItems[conversationItems.length - 1]
     const showLoadingAfterLastTurn = isLoading &&
@@ -316,6 +411,112 @@ export const Chat: React.FC = () => {
         }
         return true
     }
+
+    const fetchSuggestions = useCallback(async (options?: { force?: boolean }) => {
+        if (fetchPromiseRef.current) {
+            if (!options?.force) {
+                return fetchPromiseRef.current
+            }
+            try {
+                await fetchPromiseRef.current
+            } catch {
+                // ignored - previous error already surfaced
+            }
+        }
+
+        const nextFetch = (async () => {
+            setSuggestionsError(null)
+            setIsSuggestionsLoading(true)
+            try {
+                const result = await window.sidebarAPI.getSmartSuggestions(SMART_SUGGESTION_COUNT)
+                if (Array.isArray(result) && result.length > 0) {
+                    setSuggestions(result)
+                } else {
+                    setSuggestions([])
+                }
+            } catch (error) {
+                console.error('Failed to load smart suggestions:', error)
+                setSuggestionsError("Couldn't load suggestions. Try again.")
+            } finally {
+                setIsSuggestionsLoading(false)
+                fetchPromiseRef.current = null
+            }
+        })()
+
+        fetchPromiseRef.current = nextFetch
+        return nextFetch
+    }, [])
+
+    const lastAssistantMessageKey = useMemo(() => {
+        for (let i = conversationItems.length - 1; i >= 0; i--) {
+            const item = conversationItems[i]
+            if (item.type === 'message' && item.message.role === 'assistant') {
+                return `${item.message.id}-${item.message.content.length}`
+            }
+        }
+        return 'none'
+    }, [conversationItems])
+
+    useEffect(() => {
+        let cancelled = false
+
+        const maybeRefetch = async () => {
+            let url: string | null = null
+            try {
+                url = await getCurrentUrl()
+            } catch (error) {
+                console.warn('Failed to resolve current URL for suggestions:', error)
+            }
+
+            if (cancelled) return
+
+            const normalizedUrl = url ?? null
+            const urlChanged = normalizedUrl !== currentUrlRef.current
+            const assistantChanged = lastAssistantMessageKey !== assistantKeyRef.current
+
+            if (!hasFetchedSuggestionsRef.current || urlChanged || assistantChanged) {
+                currentUrlRef.current = normalizedUrl
+                assistantKeyRef.current = lastAssistantMessageKey
+                hasFetchedSuggestionsRef.current = true
+                await fetchSuggestions()
+            }
+        }
+
+        maybeRefetch()
+
+        return () => {
+            cancelled = true
+        }
+    }, [getCurrentUrl, lastAssistantMessageKey, fetchSuggestions])
+
+    const handleRefreshSuggestions = useCallback(() => {
+        fetchSuggestions({ force: true })
+    }, [fetchSuggestions])
+
+    const handleSuggestionSelect = useCallback(async (suggestion: string) => {
+        const trimmed = suggestion.trim()
+        if (!trimmed || isLoading || isAgentBusy) return
+        setAreSuggestionsCollapsed(true)
+        try {
+            await sendMessage(trimmed)
+        } catch (error) {
+            console.error('Failed to send suggestion as message:', error)
+        } finally {
+            fetchSuggestions({ force: true })
+        }
+    }, [isLoading, isAgentBusy, sendMessage, fetchSuggestions])
+
+    const handleToggleSuggestionsCollapsed = useCallback(() => {
+        setAreSuggestionsCollapsed(prev => !prev)
+    }, [])
+
+    const handleUserSend = useCallback((content: string) => {
+        const normalized = content.trim()
+        if (!normalized) return
+        setAreSuggestionsCollapsed(true)
+        sendMessage(normalized)
+        fetchSuggestions({ force: true })
+    }, [sendMessage, fetchSuggestions])
 
     const renderedConversation: React.ReactNode[] = []
     for (let i = 0; i < conversationItems.length; i++) {
@@ -415,9 +616,19 @@ export const Chat: React.FC = () => {
             </div>
 
             {/* Input Area */}
-            <div className="p-4">
+            <div className="p-4 flex flex-col gap-3">
+                <SmartSuggestions
+                    suggestions={suggestions}
+                    isLoading={isSuggestionsLoading}
+                    error={suggestionsError}
+                    disabled={isLoading || isAgentBusy}
+                    onSelect={handleSuggestionSelect}
+                    onRefresh={handleRefreshSuggestions}
+                    collapsed={areSuggestionsCollapsed}
+                    onToggleCollapsed={handleToggleSuggestionsCollapsed}
+                />
                 <ChatInput
-                    onSend={sendMessage}
+                    onSend={handleUserSend}
                     disabled={isLoading || isAgentBusy}
                 />
             </div>
