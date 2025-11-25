@@ -7,6 +7,7 @@ import { useChat } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
 import { AgentActivityCard } from './AgentActivityCard'
+import { Suggestion, Suggestions } from './ai-elements/Suggestions'
 
 const SMART_SUGGESTION_COUNT = 3
 
@@ -165,34 +166,38 @@ const SmartSuggestions: React.FC<{
     collapsed: boolean
     onToggleCollapsed: () => void
 }> = ({ suggestions, isLoading, error, disabled, onSelect, onRefresh, collapsed, onToggleCollapsed }) => {
-    const placeholderPills = Array.from({ length: SMART_SUGGESTION_COUNT }).map((_, index) => (
-        <div
-            key={`placeholder-${index}`}
-            className="h-8 w-28 rounded-full bg-muted/70 dark:bg-muted/40 animate-pulse"
-        />
-    ))
+    const renderPlaceholder = () => (
+        <Suggestions className="mt-3">
+            {Array.from({ length: SMART_SUGGESTION_COUNT }).map((_, index) => (
+                <div
+                    key={`placeholder-${index}`}
+                    className="h-8 w-32 rounded-full bg-muted/60 dark:bg-muted/40 animate-pulse"
+                />
+            ))}
+        </Suggestions>
+    )
 
     return (
-        <div className="w-full rounded-3xl border border-border bg-secondary/30 dark:bg-secondary/50 p-3">
-            <div className="flex items-center justify-between text-xs text-muted-foreground gap-2">
+        <div className="w-full rounded-3xl border border-border/70 bg-secondary/20 p-4 shadow-inner shadow-primary/5">
+            <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
                 <span>Smart suggestions</span>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                     <button
                         type="button"
                         onClick={onRefresh}
                         disabled={isLoading}
                         className={cn(
-                            "p-1 rounded-full hover:bg-muted transition-colors",
-                            isLoading && "text-muted-foreground/60 cursor-not-allowed"
+                            'inline-flex size-7 items-center justify-center rounded-full border border-transparent text-muted-foreground/80 transition hover:border-border hover:text-foreground',
+                            isLoading && 'cursor-not-allowed opacity-60'
                         )}
                         aria-label="Refresh smart suggestions"
                     >
-                        <RefreshCcw className={cn("size-4", isLoading && "animate-spin")} />
+                        <RefreshCcw className={cn('size-3.5', isLoading && 'animate-spin')} />
                     </button>
                     <button
                         type="button"
                         onClick={onToggleCollapsed}
-                        className="px-2 py-1 rounded-full border border-border hover:border-primary transition-colors text-[11px]"
+                        className="rounded-full border border-border px-3 py-1 text-[11px] font-medium text-foreground/70 transition hover:border-primary/40 hover:text-primary"
                     >
                         {collapsed ? 'Show' : 'Hide'}
                     </button>
@@ -200,38 +205,24 @@ const SmartSuggestions: React.FC<{
             </div>
 
             {error && !collapsed && (
-                <p className="mt-2 text-[11px] text-destructive">
-                    {error}
-                </p>
+                <p className="mt-2 text-[11px] text-destructive">{error}</p>
             )}
 
             {collapsed ? (
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                    Suggestions hidden. Tap Show to expand.
-                </p>
+                <p className="mt-2 text-[11px] text-muted-foreground">Suggestions hidden. Tap Show.</p>
+            ) : suggestions.length === 0 && isLoading ? (
+                renderPlaceholder()
             ) : (
-                <div className="mt-3 flex flex-wrap gap-2">
-                    {isLoading && suggestions.length === 0 ? (
-                        placeholderPills
-                    ) : (
-                        suggestions.map((suggestion) => (
-                            <button
-                                key={suggestion}
-                                type="button"
-                                disabled={disabled}
-                                onClick={() => onSelect(suggestion)}
-                                className={cn(
-                                    "px-4 py-1.5 rounded-full border text-xs transition-all",
-                                    "bg-background/70 dark:bg-background/30 border-border",
-                                    "hover:border-primary hover:text-primary hover:bg-primary/5",
-                                    disabled && "opacity-50 cursor-not-allowed hover:border-border"
-                                )}
-                            >
-                                {suggestion}
-                            </button>
-                        ))
-                    )}
-                </div>
+                <Suggestions className="mt-3">
+                    {suggestions.map((suggestion) => (
+                        <Suggestion
+                            key={suggestion}
+                            suggestion={suggestion}
+                            disabled={disabled}
+                            onClick={onSelect}
+                        />
+                    ))}
+                </Suggestions>
             )}
         </div>
     )
@@ -377,14 +368,23 @@ export const Chat: React.FC = () => {
         lastItem?.type === 'message' &&
         lastItem.message.role === 'user'
 
+    const normalizeNarrative = useCallback((value: string | null | undefined) => {
+        if (!value) return ''
+        return value
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .replace(/[“”"'.!,;:]/g, '')
+            .trim()
+    }, [])
+
     const agentNarrativeCounts = useMemo(() => {
         const counts = new Map<string, number>()
         for (const item of conversationItems) {
             if (item.type !== 'agent-activity') continue
             if (item.activity.isRunning) continue
 
-            const finalResponse = item.activity.finalResponse?.trim()
-            const error = item.activity.error?.trim()
+            const finalResponse = normalizeNarrative(item.activity.finalResponse)
+            const error = normalizeNarrative(item.activity.error)
 
             if (finalResponse) {
                 counts.set(finalResponse, (counts.get(finalResponse) ?? 0) + 1)
@@ -395,12 +395,12 @@ export const Chat: React.FC = () => {
             }
         }
         return counts
-    }, [conversationItems])
+    }, [conversationItems, normalizeNarrative])
 
     const narrativeCounts = new Map(agentNarrativeCounts)
 
     const shouldHideAssistantNarrative = (content: string) => {
-        const normalized = content.trim()
+        const normalized = normalizeNarrative(content)
         if (!normalized) return false
         const remaining = narrativeCounts.get(normalized)
         if (!remaining) return false
