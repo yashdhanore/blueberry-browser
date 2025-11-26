@@ -21,7 +21,7 @@ export class ContextManager extends EventEmitter {
     super();
 
     this.config = {
-      maxTurns: config?.maxTurns || 20,
+      maxTurns: config?.maxTurns || 50,
       maxRetries: config?.maxRetries || 3,
       timeout: config?.timeout || 5 * 60 * 1000, // 5 minutes
     };

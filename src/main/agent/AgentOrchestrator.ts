@@ -18,6 +18,7 @@ import { createLocatorTools } from "./LocatorTools";
 interface StagehandProvider {
   getStagehand(): Promise<any>;
   getPageForActiveTab(window: Window): Promise<any>;
+  interruptAgentExecution(): Promise<void>;
 }
 
 export class AgentOrchestrator extends EventEmitter {
@@ -26,6 +27,7 @@ export class AgentOrchestrator extends EventEmitter {
   private context: ContextManager;
   private stagehandService: StagehandProvider;
   private isRunning: boolean = false;
+  private isCancelledByUser: boolean = false;
 
   constructor(window: Window, stagehandService: StagehandProvider) {
     super();
@@ -43,6 +45,7 @@ export class AgentOrchestrator extends EventEmitter {
     }
 
     this.isRunning = true;
+    this.isCancelledByUser = false;
 
     this.context.startTask(goal);
     this.emit("start", { goal });
@@ -62,16 +65,23 @@ export class AgentOrchestrator extends EventEmitter {
 
       await this.runStagehandAgent();
     } catch (error) {
-      console.error("Agent error:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      this.context.failTask(errorMessage);
-      this.emit("error", {
-        error: errorMessage,
-        turn: this.context.getCurrentTurn(),
-      });
+      if (this.isCancelledByUser) {
+        console.info(
+          "[AgentOrchestrator] Agent task was cancelled by the user."
+        );
+      } else {
+        console.error("Agent error:", error);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        this.context.failTask(errorMessage);
+        this.emit("error", {
+          error: errorMessage,
+          turn: this.context.getCurrentTurn(),
+        });
+      }
     } finally {
       this.isRunning = false;
+      this.isCancelledByUser = false;
     }
   }
 
@@ -80,6 +90,13 @@ export class AgentOrchestrator extends EventEmitter {
       throw new Error("No task is running");
     }
 
+    this.isCancelledByUser = true;
+    await this.stagehandService.interruptAgentExecution().catch((error) => {
+      console.warn(
+        "[AgentOrchestrator] Failed to interrupt agent execution:",
+        error
+      );
+    });
     this.context.cancelTask();
     this.emit("cancelled", {});
   }

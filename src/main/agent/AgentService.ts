@@ -99,6 +99,24 @@ export class AgentService extends EventEmitter {
     }
   }
 
+  async interruptAgentExecution(): Promise<void> {
+    if (!this.stagehand) return;
+    try {
+      console.log(
+        "[AgentService] Interrupting Stagehand session due to cancellation..."
+      );
+      await this.stagehand.close({ force: true });
+    } catch (error) {
+      console.warn(
+        "[AgentService] Failed to close Stagehand during cancellation:",
+        error
+      );
+    } finally {
+      this.stagehand = null;
+      this.initPromise = null;
+    }
+  }
+
   getAgentState(): {
     isRunning: boolean;
     isPaused: boolean;
@@ -295,6 +313,7 @@ export class AgentService extends EventEmitter {
       localBrowserLaunchOptions: {
         cdpUrl,
       },
+      selfHeal: true,
     });
 
     await stagehand.init();
