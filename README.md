@@ -65,7 +65,7 @@ The implementation is designed to be:
     - Agent activity items into a single `conversationItems`.
   - `AgentActivityCard` renders an agent run card shows:
     - Compact / detailed views.
-    - Progress (turns vs `maxTurns`), current reasoning, structured action list, errors and final outcome.
+    - Progress, current reasoning, structured action list, errors and final outcome.
     - Latest screenshot of what the agent was seeing.
     - Controls for **Pause**, **Resume**, **Cancel**, and **Dismiss**.
   - `Chat` composes the chat transcript, smart suggestions, and the agent activity card into one UX.
@@ -112,7 +112,7 @@ The implementation is designed to be:
 
 4. **Configure `.env` for the chat LLM (and Stagehand, if needed)**
 
-At minimum you need an API key for the chat LLM, you also need a gemini api key since we use gemini computer use model:
+At minimum you need an API key for the chat LLM, you also need a gemini api key since we use gemini computer use model. To get the gemini api key go to [Google AI studio](https://aistudio.google.com/):
 
 ```bash
 # OpenAI (default)
