@@ -4,6 +4,9 @@ This fork adds **Gemini Computer Use (CU)** to Blueberry Browser.
 
 The goal of this implementation is to let an AI agent **control the browser** – navigate, click, type, scroll, read pages, and extract data – through a **safe, observable and well-structured integration**, with a sidebar UX that clearly shows what the agent is doing.
 
+here's a quick demo:
+[Blueberry](https://www.loom.com/share/a257d0ffe9d145de9c80a3de36849a6b)
+
 ---
 
 ## Implemented Feature: Gemini Computer Use Agent
