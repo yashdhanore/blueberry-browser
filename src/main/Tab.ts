@@ -6,6 +6,7 @@ export class Tab {
   private _title: string;
   private _url: string;
   private _isVisible: boolean = false;
+  private _isInteractionLocked: boolean = false;
 
   constructor(id: string, url: string = "https://www.google.com") {
     this._id = id;
@@ -38,10 +39,29 @@ export class Tab {
     // Update URL when navigation occurs
     this.webContentsView.webContents.on("did-navigate", (_, url) => {
       this._url = url;
+      if (this._isInteractionLocked) {
+        void this.updateControlBanner();
+      }
     });
 
     this.webContentsView.webContents.on("did-navigate-in-page", (_, url) => {
       this._url = url;
+      if (this._isInteractionLocked) {
+        void this.updateControlBanner();
+      }
+    });
+
+    // Prevent user interaction when this tab is locked (e.g. while the agent is running)
+    this.webContentsView.webContents.on("before-input-event", (event) => {
+      if (this.shouldBlockUserInteraction()) {
+        event.preventDefault();
+      }
+    });
+
+    this.webContentsView.webContents.on("before-mouse-event", (event) => {
+      if (this.shouldBlockUserInteraction()) {
+        event.preventDefault();
+      }
     });
   }
 
@@ -62,6 +82,10 @@ export class Tab {
     return this._isVisible;
   }
 
+  get isInteractionLocked(): boolean {
+    return this._isInteractionLocked;
+  }
+
   get webContents() {
     return this.webContentsView.webContents;
   }
@@ -79,6 +103,11 @@ export class Tab {
   hide(): void {
     this._isVisible = false;
     this.webContentsView.setVisible(false);
+  }
+
+  setInteractionLocked(locked: boolean): void {
+    this._isInteractionLocked = locked;
+    void this.updateControlBanner();
   }
 
   async screenshot(): Promise<NativeImage> {
@@ -124,5 +153,56 @@ export class Tab {
 
   destroy(): void {
     this.webContentsView.webContents.close();
+  }
+
+  private shouldBlockUserInteraction(): boolean {
+    return this._isInteractionLocked;
+  }
+
+  private async updateControlBanner(): Promise<void> {
+    try {
+      if (this._isInteractionLocked) {
+        await this.runJs(`
+          (function () {
+            const existing = document.getElementById("__blueberry_agent_banner__");
+            if (existing) return;
+
+            const banner = document.createElement("div");
+            banner.id = "__blueberry_agent_banner__";
+            Object.assign(banner.style, {
+              position: "fixed",
+              bottom: "24px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "8px 18px",
+              borderRadius: "999px",
+              background: "rgba(0, 0, 0, 0.8)",
+              color: "#f2f6ff",
+              fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+              fontSize: "13px",
+              letterSpacing: "0.3px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+              border: "1px solid rgba(122, 162, 255, 0.6)",
+              zIndex: 2147483647,
+              pointerEvents: "none"
+            });
+            banner.textContent = "Controlled by Blueberry";
+
+            (document.body || document.documentElement).appendChild(banner);
+          })();
+        `);
+      } else {
+        await this.runJs(`
+          (function () {
+            const banner = document.getElementById("__blueberry_agent_banner__");
+            if (banner) {
+              banner.remove();
+            }
+          })();
+        `);
+      }
+    } catch {
+      // Ignore banner failures
+    }
   }
 }

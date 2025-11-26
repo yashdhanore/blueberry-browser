@@ -26,6 +26,10 @@ app.whenReady().then(() => {
 
   mainWindow = createWindow();
 
+  // Provide the main window reference to the agent service so it can
+  // manage interaction locking while the agent is in control.
+  AgentService.getInstance().setWindow(mainWindow);
+
   app.on("activate", () => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.

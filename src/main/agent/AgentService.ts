@@ -150,6 +150,11 @@ export class AgentService extends EventEmitter {
 
     events.forEach((event) => {
       orchestrator.on(event, (data: any) => {
+        // Toggle interaction lock on the main window while the agent is active
+        if (event === "start") {
+          this.window?.setAgentInteractionLocked(true);
+        }
+
         this.forwardAgentUpdate(event, data);
         const directEvent = event === "error" ? "agent-error" : event;
         this.emit(directEvent, data);
@@ -160,6 +165,8 @@ export class AgentService extends EventEmitter {
           event === "error" ||
           event === "cancelled"
         ) {
+          // Release interaction lock once the agent is done
+          this.window?.setAgentInteractionLocked(false);
           this.orchestrator = null;
         }
       });

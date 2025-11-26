@@ -113,7 +113,7 @@ export const AgentActivityCard: React.FC<AgentActivityCardProps> = ({
     const ScreenshotBlock = () => (
         <Task>
             <TaskHeader>
-                <span>👁️ Agent view</span>
+                <span>Agent view</span>
                 {screenshot && (
                     <TaskMeta>
                         Captured {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
