@@ -138,7 +138,7 @@ LLM_MODEL=gpt-4o-mini
   - Introducing `AgentOrchestrator` avoids pushing complex lifecycle logic into either Stagehand wrappers or UI code. This makes it much easier to reason about **one agent run at a time** and to evolve the protocol later.
 
 - **Iterated from a custom Gemini CU loop**
-  - The first version (see the `computer-use` branch) implemented Computer Use manually: capture screenshot → send to Gemini → parse the response into actions → execute actions via denormalised screen coordinates.
+  - The first version (see the `computer-use-initialize` branch) implemented Computer Use manually: capture screenshot → send to Gemini → parse the response into actions → execute actions via denormalised screen coordinates.
   - This proved brittle and slow in practice: even with correct coordinate maths, Gemini often missed the intended targets, and the orchestration loop became complex to maintain.
 
 - **Attaching Stagehand to Electron instead of spawning a separate browser**
