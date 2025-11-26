@@ -41,6 +41,12 @@ const DEFAULT_MODELS: Record<LLMProvider, string> = {
 const MAX_CONTEXT_LENGTH = 4000;
 const DEFAULT_TEMPERATURE = 0.7;
 const AGENT_TRIGGER_CONFIDENCE = 0.55;
+const MAX_SUGGESTION_PAGE_TEXT = 1200;
+const DEFAULT_SUGGESTIONS = [
+  "Summarize the important information on this page",
+  "Find key data points or prices shown here",
+  "Extract the main tasks I can do on this page",
+] as const;
 
 export class LLMClient {
   private readonly webContents: WebContents;
@@ -65,7 +71,6 @@ export class LLMClient {
     this.agentService.on("cancelled", () => this.handleAgentCancelled());
   }
 
-  // Set the window reference after construction to avoid circular dependencies
   setWindow(window: Window): void {
     this.window = window;
   }
@@ -180,11 +185,78 @@ export class LLMClient {
         return;
       }
 
-      const messages = await this.prepareMessagesWithContext(request, pageContext);
+      const messages = await this.prepareMessagesWithContext(
+        request,
+        pageContext
+      );
       await this.streamResponse(messages, request.messageId);
     } catch (error) {
       console.error("Error in LLM request:", error);
       this.handleStreamError(error, request.messageId);
+    }
+  }
+
+  async generateSmartSuggestions(count = 3): Promise<string[]> {
+    if (!this.model) {
+      console.warn(
+        "[LLMClient] Smart suggestions unavailable because no LLM model is configured."
+      );
+      return this.fallbackSuggestions(count);
+    }
+
+    try {
+      const pageContext = await this.collectPageContext();
+      const conversationSummary = this.buildConversationSummary(count * 2);
+      const promptParts = [
+        pageContext.pageUrl ? `Current URL: ${pageContext.pageUrl}` : null,
+        pageContext.pageText
+          ? `Visible text excerpt:\n${this.truncateText(
+              pageContext.pageText,
+              MAX_SUGGESTION_PAGE_TEXT
+            )}`
+          : null,
+        conversationSummary ? `Recent chat:\n${conversationSummary}` : null,
+      ].filter(Boolean);
+
+      const userPrompt =
+        promptParts.join("\n\n") ||
+        "No additional context available. Provide universally helpful browser tasks.";
+
+      const systemPrompt = [
+        "You suggest concise, high-impact next actions for a browsing assistant.",
+        `Return a JSON array with up to ${count} short suggestion strings (<= 80 characters).`,
+        "Each suggestion should be a concrete task or question the assistant could execute about the current page or context.",
+        "Prioritize page-specific ideas when possible; otherwise fall back to broadly useful actions.",
+        "Output only valid JSON. Do not include explanations, code blocks, or prose outside the array.",
+      ].join(" ");
+
+      const result = await streamText({
+        model: this.model,
+        temperature: 0.4,
+        maxRetries: 2,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      });
+
+      let raw = "";
+      for await (const chunk of result.textStream) {
+        raw += chunk;
+      }
+
+      const parsed = this.parseSuggestionResponse(raw, count);
+      if (parsed.length > 0) {
+        return parsed;
+      }
+
+      console.warn(
+        "[LLMClient] Smart suggestions response did not include parsable results. Falling back to defaults."
+      );
+      return this.fallbackSuggestions(count);
+    } catch (error) {
+      console.warn("[LLMClient] Failed to generate smart suggestions:", error);
+      return this.fallbackSuggestions(count);
     }
   }
 
@@ -198,7 +270,114 @@ export class LLMClient {
   }
 
   private shouldRouteToAgent(intent: IntentClassification): boolean {
-    return intent.mode === "agent" && intent.confidence >= AGENT_TRIGGER_CONFIDENCE;
+    return (
+      intent.mode === "agent" && intent.confidence >= AGENT_TRIGGER_CONFIDENCE
+    );
+  }
+
+  private buildConversationSummary(sampleSize: number): string {
+    if (this.messages.length === 0) {
+      return "";
+    }
+
+    const recent = this.messages.slice(-sampleSize);
+    const formatted = recent
+      .map((msg) => {
+        const label = msg.role === "assistant" ? "Assistant" : "User";
+        const text = this.renderMessageContent(msg.content);
+        if (!text) return null;
+        return `${label}: ${text}`;
+      })
+      .filter(Boolean);
+
+    return formatted.join("\n");
+  }
+
+  private renderMessageContent(content: CoreMessage["content"]): string {
+    if (typeof content === "string") {
+      return content.trim();
+    }
+
+    if (Array.isArray(content)) {
+      return content
+        .map((part) => {
+          if (!part) return "";
+          if (typeof part === "string") {
+            return part;
+          }
+          if (typeof part === "object") {
+            if ("text" in part && typeof part.text === "string") {
+              return part.text;
+            }
+            if ("image" in part) {
+              return "[image]";
+            }
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+    }
+
+    if (content && typeof content === "object" && "text" in content) {
+      const possibleText = (content as any).text;
+      return typeof possibleText === "string" ? possibleText.trim() : "";
+    }
+
+    return "";
+  }
+
+  private parseSuggestionResponse(raw: string, limit: number): string[] {
+    if (!raw) return [];
+
+    const trimmed = raw.trim();
+    const start = trimmed.indexOf("[");
+    const end = trimmed.lastIndexOf("]");
+    const target =
+      start !== -1 && end !== -1 && end > start
+        ? trimmed.slice(start, end + 1)
+        : trimmed;
+
+    try {
+      const parsed = JSON.parse(target);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item) => {
+            if (typeof item === "string") {
+              return item.trim();
+            }
+            if (item && typeof item === "object" && "suggestion" in item) {
+              const value = (item as Record<string, unknown>).suggestion;
+              return typeof value === "string" ? value.trim() : "";
+            }
+            return "";
+          })
+          .filter((item) => item.length > 0)
+          .slice(0, limit);
+      }
+    } catch (error) {
+      console.warn(
+        "[LLMClient] Unable to parse smart suggestion payload:",
+        error,
+        raw
+      );
+    }
+
+    return [];
+  }
+
+  private fallbackSuggestions(count: number): string[] {
+    const suggestions = [...DEFAULT_SUGGESTIONS];
+    if (count <= suggestions.length) {
+      return suggestions.slice(0, count);
+    }
+
+    while (suggestions.length < count) {
+      suggestions.push(...DEFAULT_SUGGESTIONS);
+    }
+
+    return suggestions.slice(0, count);
   }
 
   private async handleAgentRouting(
@@ -288,7 +467,9 @@ export class LLMClient {
         const confidence =
           typeof parsed.confidence === "number" ? parsed.confidence : 0;
         const reason =
-          typeof parsed.reason === "string" ? parsed.reason : "Routing by default.";
+          typeof parsed.reason === "string"
+            ? parsed.reason
+            : "Routing by default.";
         return { mode, confidence, reason };
       }
     } catch (error) {
@@ -316,7 +497,10 @@ export class LLMClient {
     return { pageUrl, pageText };
   }
 
-  private handleAgentComplete(data: { finalResponse?: string; duration?: number }): void {
+  private handleAgentComplete(data: {
+    finalResponse?: string;
+    duration?: number;
+  }): void {
     const durationSeconds =
       typeof data?.duration === "number"
         ? ` in ${Math.round(data.duration / 1000)}s`
@@ -324,7 +508,9 @@ export class LLMClient {
     const summary =
       data?.finalResponse ||
       "The autonomous agent finished the requested task.";
-    this.appendAssistantMessage(`Agent task completed${durationSeconds}: ${summary}`);
+    this.appendAssistantMessage(
+      `Agent task completed${durationSeconds}: ${summary}`
+    );
   }
 
   private handleAgentError(data: { error?: string }): void {

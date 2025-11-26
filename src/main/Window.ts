@@ -10,6 +10,7 @@ export class Window {
   private tabCounter: number = 0;
   private _topBar: TopBar;
   private _sideBar: SideBar;
+  private _isAgentInteractionLocked: boolean = false;
 
   constructor() {
     // Create the browser window.
@@ -97,16 +98,16 @@ export class Window {
     this._baseWindow.contentView.addChildView(tab.view);
 
     // Set the bounds to fill the window below the topbar and to the left of sidebar
-    const bounds = this._baseWindow.getBounds();
-    tab.view.setBounds({
-      x: 0,
-      y: 88, // Start below the topbar
-      width: bounds.width - 400, // Subtract sidebar width
-      height: bounds.height - 88, // Subtract topbar height
-    });
+    const contentBounds = this.getContentBounds();
+    tab.view.setBounds(contentBounds);
 
     // Store the tab
     this.tabsMap.set(tabId, tab);
+
+    // If the agent currently has control, ensure this tab is also locked
+    if (this._isAgentInteractionLocked) {
+      tab.setInteractionLocked(true);
+    }
 
     // If this is the first tab, make it active
     if (this.tabsMap.size === 1) {
@@ -168,6 +169,9 @@ export class Window {
     // Show the new active tab
     tab.show();
     this.activeTabId = tabId;
+
+    // Ensure interaction lock state is applied to the active tab
+    tab.setInteractionLocked(this._isAgentInteractionLocked);
 
     // Update the window title to match the tab title
     this._baseWindow.setTitle(tab.title || "Blueberry Browser");
@@ -231,17 +235,10 @@ export class Window {
 
   // Handle window resize to update tab bounds
   private updateTabBounds(): void {
-    const bounds = this._baseWindow.getBounds();
-    // Only subtract sidebar width if it's visible
-    const sidebarWidth = this._sideBar.getIsVisible() ? 400 : 0;
+    const contentBounds = this.getContentBounds();
 
     this.tabsMap.forEach((tab) => {
-      tab.view.setBounds({
-        x: 0,
-        y: 88, // Start below the topbar
-        width: bounds.width - sidebarWidth,
-        height: bounds.height - 88, // Subtract topbar height
-      });
+      tab.view.setBounds(contentBounds);
     });
   }
 
@@ -269,5 +266,31 @@ export class Window {
   // Getter for baseWindow to access from Menu
   get baseWindow(): BaseWindow {
     return this._baseWindow;
+  }
+
+  // Agent interaction lock controls
+  setAgentInteractionLocked(locked: boolean): void {
+    this._isAgentInteractionLocked = locked;
+
+    this.tabsMap.forEach((tab) => {
+      tab.setInteractionLocked(locked);
+    });
+  }
+
+  private getContentBounds(): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } {
+    const bounds = this._baseWindow.getBounds();
+    const sidebarWidth = this._sideBar.getIsVisible() ? 400 : 0;
+
+    return {
+      x: 0,
+      y: 88,
+      width: bounds.width - sidebarWidth,
+      height: bounds.height - 88,
+    };
   }
 }

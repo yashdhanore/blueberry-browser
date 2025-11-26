@@ -1,12 +1,15 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { ArrowUp, Plus } from 'lucide-react'
+import { ArrowUp, Plus, RefreshCcw } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
 import { AgentActivityCard } from './AgentActivityCard'
+import { Suggestion, Suggestions } from './ai-elements/Suggestions'
+
+const SMART_SUGGESTION_COUNT = 3
 
 interface Message {
     id: string
@@ -60,6 +63,7 @@ const StreamingText: React.FC<{ content: string }> = ({ content }) => {
             }, 10)
             return () => clearTimeout(timer)
         }
+        return undefined
     }, [content, currentIndex])
 
     return (
@@ -147,6 +151,79 @@ const LoadingIndicator: React.FC = () => {
             isVisible ? "scale-100" : "scale-0"
         )}>
             ...
+        </div>
+    )
+}
+
+// Smart Suggestions Component
+const SmartSuggestions: React.FC<{
+    suggestions: string[]
+    isLoading: boolean
+    error: string | null
+    disabled: boolean
+    onSelect: (suggestion: string) => void
+    onRefresh: () => void
+    collapsed: boolean
+    onToggleCollapsed: () => void
+}> = ({ suggestions, isLoading, error, disabled, onSelect, onRefresh, collapsed, onToggleCollapsed }) => {
+    const renderPlaceholder = () => (
+        <Suggestions className="mt-3">
+            {Array.from({ length: SMART_SUGGESTION_COUNT }).map((_, index) => (
+                <div
+                    key={`placeholder-${index}`}
+                    className="h-8 w-32 rounded-full bg-muted/60 dark:bg-muted/40 animate-pulse"
+                />
+            ))}
+        </Suggestions>
+    )
+
+    return (
+        <div className="w-full rounded-3xl border border-border/70 bg-secondary/20 p-4 shadow-inner shadow-primary/5">
+            <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                <span>Smart suggestions</span>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={onRefresh}
+                        disabled={isLoading}
+                        className={cn(
+                            'inline-flex size-7 items-center justify-center rounded-full border border-transparent text-muted-foreground/80 transition hover:border-border hover:text-foreground',
+                            isLoading && 'cursor-not-allowed opacity-60'
+                        )}
+                        aria-label="Refresh smart suggestions"
+                    >
+                        <RefreshCcw className={cn('size-3.5', isLoading && 'animate-spin')} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onToggleCollapsed}
+                        className="rounded-full border border-border px-3 py-1 text-[11px] font-medium text-foreground/70 transition hover:border-primary/40 hover:text-primary"
+                    >
+                        {collapsed ? 'Show' : 'Hide'}
+                    </button>
+                </div>
+            </div>
+
+            {error && !collapsed && (
+                <p className="mt-2 text-[11px] text-destructive">{error}</p>
+            )}
+
+            {collapsed ? (
+                <p className="mt-2 text-[11px] text-muted-foreground">Suggestions hidden. Tap Show.</p>
+            ) : suggestions.length === 0 && isLoading ? (
+                renderPlaceholder()
+            ) : (
+                <Suggestions className="mt-3">
+                    {suggestions.map((suggestion) => (
+                        <Suggestion
+                            key={suggestion}
+                            suggestion={suggestion}
+                            disabled={disabled}
+                            onClick={onSelect}
+                        />
+                    ))}
+                </Suggestions>
+            )}
         </div>
     )
 }
@@ -273,14 +350,32 @@ export const Chat: React.FC = () => {
         cancelAgentTask,
         pauseAgentTask,
         resumeAgentTask,
-        dismissAgentActivity
+        dismissAgentActivity,
+        getCurrentUrl
     } = useChat()
     const scrollRef = useAutoScroll(conversationItems.length)
+    const [suggestions, setSuggestions] = useState<string[]>([])
+    const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false)
+    const [suggestionsError, setSuggestionsError] = useState<string | null>(null)
+    const fetchPromiseRef = useRef<Promise<void> | null>(null)
+    const hasFetchedSuggestionsRef = useRef(false)
+    const currentUrlRef = useRef<string | null>(null)
+    const assistantKeyRef = useRef<string>('initial')
+    const [areSuggestionsCollapsed, setAreSuggestionsCollapsed] = useState(false)
 
     const lastItem = conversationItems[conversationItems.length - 1]
     const showLoadingAfterLastTurn = isLoading &&
         lastItem?.type === 'message' &&
         lastItem.message.role === 'user'
+
+    const normalizeNarrative = useCallback((value: string | null | undefined) => {
+        if (!value) return ''
+        return value
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .replace(/[“”"'.!,;:]/g, '')
+            .trim()
+    }, [])
 
     const agentNarrativeCounts = useMemo(() => {
         const counts = new Map<string, number>()
@@ -288,8 +383,8 @@ export const Chat: React.FC = () => {
             if (item.type !== 'agent-activity') continue
             if (item.activity.isRunning) continue
 
-            const finalResponse = item.activity.finalResponse?.trim()
-            const error = item.activity.error?.trim()
+            const finalResponse = normalizeNarrative(item.activity.finalResponse)
+            const error = normalizeNarrative(item.activity.error)
 
             if (finalResponse) {
                 counts.set(finalResponse, (counts.get(finalResponse) ?? 0) + 1)
@@ -300,12 +395,12 @@ export const Chat: React.FC = () => {
             }
         }
         return counts
-    }, [conversationItems])
+    }, [conversationItems, normalizeNarrative])
 
     const narrativeCounts = new Map(agentNarrativeCounts)
 
     const shouldHideAssistantNarrative = (content: string) => {
-        const normalized = content.trim()
+        const normalized = normalizeNarrative(content)
         if (!normalized) return false
         const remaining = narrativeCounts.get(normalized)
         if (!remaining) return false
@@ -316,6 +411,112 @@ export const Chat: React.FC = () => {
         }
         return true
     }
+
+    const fetchSuggestions = useCallback(async (options?: { force?: boolean }) => {
+        if (fetchPromiseRef.current) {
+            if (!options?.force) {
+                return fetchPromiseRef.current
+            }
+            try {
+                await fetchPromiseRef.current
+            } catch {
+                // ignored - previous error already surfaced
+            }
+        }
+
+        const nextFetch = (async () => {
+            setSuggestionsError(null)
+            setIsSuggestionsLoading(true)
+            try {
+                const result = await window.sidebarAPI.getSmartSuggestions(SMART_SUGGESTION_COUNT)
+                if (Array.isArray(result) && result.length > 0) {
+                    setSuggestions(result)
+                } else {
+                    setSuggestions([])
+                }
+            } catch (error) {
+                console.error('Failed to load smart suggestions:', error)
+                setSuggestionsError("Couldn't load suggestions. Try again.")
+            } finally {
+                setIsSuggestionsLoading(false)
+                fetchPromiseRef.current = null
+            }
+        })()
+
+        fetchPromiseRef.current = nextFetch
+        return nextFetch
+    }, [])
+
+    const lastAssistantMessageKey = useMemo(() => {
+        for (let i = conversationItems.length - 1; i >= 0; i--) {
+            const item = conversationItems[i]
+            if (item.type === 'message' && item.message.role === 'assistant') {
+                return `${item.message.id}-${item.message.content.length}`
+            }
+        }
+        return 'none'
+    }, [conversationItems])
+
+    useEffect(() => {
+        let cancelled = false
+
+        const maybeRefetch = async () => {
+            let url: string | null = null
+            try {
+                url = await getCurrentUrl()
+            } catch (error) {
+                console.warn('Failed to resolve current URL for suggestions:', error)
+            }
+
+            if (cancelled) return
+
+            const normalizedUrl = url ?? null
+            const urlChanged = normalizedUrl !== currentUrlRef.current
+            const assistantChanged = lastAssistantMessageKey !== assistantKeyRef.current
+
+            if (!hasFetchedSuggestionsRef.current || urlChanged || assistantChanged) {
+                currentUrlRef.current = normalizedUrl
+                assistantKeyRef.current = lastAssistantMessageKey
+                hasFetchedSuggestionsRef.current = true
+                await fetchSuggestions()
+            }
+        }
+
+        maybeRefetch()
+
+        return () => {
+            cancelled = true
+        }
+    }, [getCurrentUrl, lastAssistantMessageKey, fetchSuggestions])
+
+    const handleRefreshSuggestions = useCallback(() => {
+        fetchSuggestions({ force: true })
+    }, [fetchSuggestions])
+
+    const handleSuggestionSelect = useCallback(async (suggestion: string) => {
+        const trimmed = suggestion.trim()
+        if (!trimmed || isLoading || isAgentBusy) return
+        setAreSuggestionsCollapsed(true)
+        try {
+            await sendMessage(trimmed)
+        } catch (error) {
+            console.error('Failed to send suggestion as message:', error)
+        } finally {
+            fetchSuggestions({ force: true })
+        }
+    }, [isLoading, isAgentBusy, sendMessage, fetchSuggestions])
+
+    const handleToggleSuggestionsCollapsed = useCallback(() => {
+        setAreSuggestionsCollapsed(prev => !prev)
+    }, [])
+
+    const handleUserSend = useCallback((content: string) => {
+        const normalized = content.trim()
+        if (!normalized) return
+        setAreSuggestionsCollapsed(true)
+        sendMessage(normalized)
+        fetchSuggestions({ force: true })
+    }, [sendMessage, fetchSuggestions])
 
     const renderedConversation: React.ReactNode[] = []
     for (let i = 0; i < conversationItems.length; i++) {
@@ -415,9 +616,19 @@ export const Chat: React.FC = () => {
             </div>
 
             {/* Input Area */}
-            <div className="p-4">
+            <div className="p-4 flex flex-col gap-3">
+                <SmartSuggestions
+                    suggestions={suggestions}
+                    isLoading={isSuggestionsLoading}
+                    error={suggestionsError}
+                    disabled={isLoading || isAgentBusy}
+                    onSelect={handleSuggestionSelect}
+                    onRefresh={handleRefreshSuggestions}
+                    collapsed={areSuggestionsCollapsed}
+                    onToggleCollapsed={handleToggleSuggestionsCollapsed}
+                />
                 <ChatInput
-                    onSend={sendMessage}
+                    onSend={handleUserSend}
                     disabled={isLoading || isAgentBusy}
                 />
             </div>

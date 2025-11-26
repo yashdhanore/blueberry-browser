@@ -185,6 +185,17 @@ export class EventManager {
     ipcMain.handle("sidebar-get-messages", () => {
       return this.mainWindow.sidebar.client.getMessages();
     });
+
+    ipcMain.handle("sidebar-get-smart-suggestions", async (_, count?: number) => {
+      try {
+        return await this.mainWindow.sidebar.client.generateSmartSuggestions(
+          typeof count === "number" ? count : undefined
+        );
+      } catch (error) {
+        console.warn("Failed to fetch smart suggestions:", error);
+        return [];
+      }
+    });
   }
 
   /**

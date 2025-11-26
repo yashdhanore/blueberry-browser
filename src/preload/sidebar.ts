@@ -62,6 +62,8 @@ const sidebarAPI = {
   getPageContent: () => electronAPI.ipcRenderer.invoke("get-page-content"),
   getPageText: () => electronAPI.ipcRenderer.invoke("get-page-text"),
   getCurrentUrl: () => electronAPI.ipcRenderer.invoke("get-current-url"),
+  getSmartSuggestions: (count?: number) =>
+    electronAPI.ipcRenderer.invoke("sidebar-get-smart-suggestions", count),
 
   // Tab information
   getActiveTabInfo: () => electronAPI.ipcRenderer.invoke("get-active-tab-info"),
