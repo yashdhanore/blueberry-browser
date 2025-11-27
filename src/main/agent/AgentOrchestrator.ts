@@ -14,6 +14,7 @@ import {
   AgentErrorCode,
 } from "./ComputerUseTypes";
 import { createLocatorTools } from "./LocatorTools";
+import { StagehandActExecutor } from "./StagehandActExecutor";
 
 interface StagehandProvider {
   getStagehand(): Promise<any>;
@@ -28,6 +29,7 @@ export class AgentOrchestrator extends EventEmitter {
   private stagehandService: StagehandProvider;
   private isRunning: boolean = false;
   private isCancelledByUser: boolean = false;
+  private actExecutor: StagehandActExecutor | null = null;
 
   constructor(window: Window, stagehandService: StagehandProvider) {
     super();
@@ -82,6 +84,11 @@ export class AgentOrchestrator extends EventEmitter {
     } finally {
       this.isRunning = false;
       this.isCancelledByUser = false;
+      // Cleanup act executor
+      if (this.actExecutor) {
+        this.actExecutor.clearPageCache();
+        this.actExecutor = null;
+      }
     }
   }
 
@@ -97,6 +104,11 @@ export class AgentOrchestrator extends EventEmitter {
         error
       );
     });
+    // Cleanup act executor
+    if (this.actExecutor) {
+      this.actExecutor.clearPageCache();
+      this.actExecutor = null;
+    }
     this.context.cancelTask();
     this.emit("cancelled", {});
   }
@@ -145,7 +157,14 @@ export class AgentOrchestrator extends EventEmitter {
     const goal = this.context.getGoal();
     const config = this.context.getConfig();
 
-    const customSelectorTools = createLocatorTools(() => page);
+    // Create the Stagehand Act executor for observe→act pattern
+    this.actExecutor = new StagehandActExecutor(this.window);
+
+    // Create tools with both page supplier and act executor
+    const customSelectorTools = createLocatorTools(
+      () => page,
+      () => this.actExecutor!
+    );
 
     const agent = stagehand.agent({
       cua: true,
@@ -156,9 +175,18 @@ You're a helpful assistant that can control a web browser called Blueberry Brows
 - Always work toward the user's stated goal step by step.
 - Only interact with the main web content in the active tab.
 - Never click or type in the top bar or sidebar UI of the app.
-- Avoid destructive or irreversible actions (e.g. deleting data, posting content) unless explicitly asked.
-- Prefer clear navigation, reading, searching, and extracting information for the user.
-      - Prefer the custom selector tools (click_selector, fill_selector, type_selector, press_keys) whenever you can identify a stable CSS or XPath selector. This avoids coordinate drift on high-DPI screens.
+- Avoid destructive or irreversible actions unless explicitly asked.
+
+**CRITICAL: Before scrolling or navigating away, ALWAYS check if your target is already visible on screen.**
+- After ANY scroll action, pause and scan the visible content for elements matching your goal
+- If you see a link, button, or text that matches what you're looking for, CLICK IT IMMEDIATELY
+- Do NOT search externally for something that is already visible on the current page
+- Prefer clicking existing links over typing new searches
+
+**ACTION TOOLS:**
+- Use \`act_instruction\` for natural language browser interactions (clicking buttons, filling forms, selecting dropdowns). This tool uses Stagehand's observe→act pattern for self-healing, deterministic execution.
+- Use selector-based tools (click_selector, fill_selector, type_selector, press_keys) when you have a stable CSS or XPath selector and need precise control.
+- Prefer \`act_instruction\` when the selector might change or when you want automatic adaptation to website changes.
       `.trim(),
       tools: customSelectorTools,
     });

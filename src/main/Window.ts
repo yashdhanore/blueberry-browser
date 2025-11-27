@@ -15,8 +15,8 @@ export class Window {
   constructor() {
     // Create the browser window.
     this._baseWindow = new BaseWindow({
-      width: 1688,
-      height: 800,
+      width: 1288,
+      height: 799,
       show: true,
       autoHideMenuBar: false,
       titleBarStyle: "hidden",
@@ -24,7 +24,7 @@ export class Window {
       trafficLightPosition: { x: 15, y: 13 },
     });
 
-    this._baseWindow.setMinimumSize(1688, 799);
+    this._baseWindow.setMinimumSize(1288, 799);
 
     this._topBar = new TopBar(this._baseWindow);
     this._sideBar = new SideBar(this._baseWindow);

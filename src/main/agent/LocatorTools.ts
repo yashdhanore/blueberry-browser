@@ -1,8 +1,10 @@
 import type { ToolSet } from "ai";
 import type { Page } from "@browserbasehq/stagehand";
 import { z } from "zod";
+import type { StagehandActExecutor } from "./StagehandActExecutor";
 
 type PageSupplier = () => Promise<Page> | Page;
+type ActExecutorSupplier = () => StagehandActExecutor | null;
 
 const CLICK_BUTTONS = ["left", "right", "middle"] as const;
 
@@ -30,6 +32,12 @@ const keySchema = z.object({
   keys: z.string().min(1, "keys are required"),
 });
 
+const actInstructionSchema = z.object({
+  instruction: z.string().min(1, "instruction is required"),
+  variables: z.record(z.string(), z.string()).optional(),
+  timeout: z.number().optional(),
+});
+
 const resolveLocator = async (page: Page, selector: string) => {
   const locator = page.locator(selector);
   const matchCount = await locator.count();
@@ -45,12 +53,15 @@ const resolvePage = async (supplier: PageSupplier): Promise<Page> => {
   return await Promise.resolve(supplier());
 };
 
-export const createLocatorTools = (pageSupplier: PageSupplier): ToolSet => {
+export const createLocatorTools = (
+  pageSupplier: PageSupplier,
+  actExecutorSupplier?: ActExecutorSupplier
+): ToolSet => {
   return {
     click_selector: {
       description:
         "Clicks the element that matches the provided CSS or XPath selector.",
-      inputSchema: clickSchema,
+      inputSchema: clickSchema as any,
       execute: async (args) => {
         const parsed = clickSchema.parse(args);
         const page = await resolvePage(pageSupplier);
@@ -69,7 +80,7 @@ export const createLocatorTools = (pageSupplier: PageSupplier): ToolSet => {
     fill_selector: {
       description:
         "Focuses the matching element, clears it, fills the provided value, and optionally presses Enter afterwards.",
-      inputSchema: fillSchema,
+      inputSchema: fillSchema as any,
       execute: async (args) => {
         const parsed = fillSchema.parse(args);
         const page = await resolvePage(pageSupplier);
@@ -91,7 +102,7 @@ export const createLocatorTools = (pageSupplier: PageSupplier): ToolSet => {
     type_selector: {
       description:
         "Types the provided text into the element that matches the selector. Can optionally clear first, delay typing, and press Enter afterwards.",
-      inputSchema: typeSchema,
+      inputSchema: typeSchema as any,
       execute: async (args) => {
         const parsed = typeSchema.parse(args);
         const page = await resolvePage(pageSupplier);
@@ -120,7 +131,7 @@ export const createLocatorTools = (pageSupplier: PageSupplier): ToolSet => {
     press_keys: {
       description:
         "Dispatches a key combination such as Enter, Escape, or Command shortcuts.",
-      inputSchema: keySchema,
+      inputSchema: keySchema as any,
       execute: async (args) => {
         const parsed = keySchema.parse(args);
         const page = await resolvePage(pageSupplier);
@@ -130,6 +141,54 @@ export const createLocatorTools = (pageSupplier: PageSupplier): ToolSet => {
         return {
           keys: parsed.keys,
         };
+      },
+    },
+    act_instruction: {
+      description:
+        "Execute a natural language instruction using Stagehand's observe→act pattern. " +
+        "First observes candidate actions, then executes deterministically. " +
+        "Use this for single-step browser interactions like clicking buttons, filling forms, or selecting dropdowns. " +
+        "This tool provides self-healing behavior and automatic adaptation to website changes.",
+      inputSchema: actInstructionSchema as any,
+      execute: async (args) => {
+        const parsed = actInstructionSchema.parse(args);
+        const executor = actExecutorSupplier?.();
+
+        if (!executor) {
+          throw new Error(
+            "StagehandActExecutor not available. This tool requires the act executor to be configured."
+          );
+        }
+
+        try {
+          // Use observe→act pattern for deterministic execution
+          const result = await executor.actAfterObserve(parsed.instruction, {
+            variables: parsed.variables as Record<string, string> | undefined,
+            timeout: parsed.timeout,
+          });
+
+          if (!result.success) {
+            throw new Error(
+              result.error || result.message || "Action execution failed"
+            );
+          }
+
+          return {
+            success: true,
+            message: result.message,
+            actionDescription: result.actionDescription,
+            actionsCount: result.actions.length,
+            actions: result.actions.map((a) => ({
+              selector: a.selector,
+              description: a.description,
+              method: a.method,
+            })),
+          };
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          throw new Error(`Act instruction failed: ${errorMessage}`);
+        }
       },
     },
   };

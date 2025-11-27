@@ -1,11 +1,6 @@
 import { Window } from "../Window";
 import { AgentService } from "./AgentService";
-import {
-  COORDINATE_RANGE,
-  ScrollAtParams,
-  ToolResult,
-  TypeParams,
-} from "./ComputerUseTypes";
+import { ScrollAtParams, ToolResult } from "./ComputerUseTypes";
 
 export class ComputerUseActions {
   private window: Window;
@@ -18,18 +13,6 @@ export class ComputerUseActions {
 
   private async getStagehandPage() {
     return this.stagehandService.getPageForActiveTab(this.window);
-  }
-
-  async denormalizeCoords(
-    normalizedX: number,
-    normalizedY: number
-  ): Promise<{ x: number; y: number }> {
-    const viewport = await this.getViewportSize();
-
-    const x = Math.round((normalizedX / COORDINATE_RANGE) * viewport.width);
-    const y = Math.round((normalizedY / COORDINATE_RANGE) * viewport.height);
-
-    return { x, y };
   }
 
   async navigate(url: string): Promise<ToolResult> {
@@ -103,102 +86,6 @@ export class ComputerUseActions {
     }
   }
 
-  async clickAt(normalizedX: number, normalizedY: number): Promise<ToolResult> {
-    try {
-      const { x, y } = await this.denormalizeCoords(normalizedX, normalizedY);
-      const page = await this.getStagehandPage();
-
-      await page.click(x, y);
-
-      await this.waitForPageSettle();
-
-      const info = await this.getElementInfoAt(x, y);
-
-      return {
-        success: true,
-        data: info,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  async typeTextAt(params: TypeParams): Promise<ToolResult> {
-    try {
-      const { x, y, text, pressEnter = false, clearFirst = true } = params;
-      const page = await this.getStagehandPage();
-
-      await page.click(x, y);
-      await this.wait(0.1);
-
-      if (clearFirst) {
-        // Select all and delete
-        const modifier = process.platform === "darwin" ? "Meta" : "Control";
-        await page.keyPress(`${modifier}+A`);
-        await this.wait(0.1);
-        await page.keyPress("Backspace");
-      }
-
-      await page.type(text);
-
-      if (pressEnter) {
-        await this.wait(0.1);
-        await page.keyPress("Enter");
-      }
-
-      await this.waitForPageSettle();
-
-      return {
-        success: true,
-        data: { text },
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  async hoverAt(normalizedX: number, normalizedY: number): Promise<ToolResult> {
-    try {
-      const { x, y } = await this.denormalizeCoords(normalizedX, normalizedY);
-      const page = await this.getStagehandPage();
-
-      await page.evaluate(
-        (coords) => {
-          const el = document.elementFromPoint(coords.x, coords.y);
-          if (el) {
-            const event = new MouseEvent("mouseover", {
-              view: window,
-              bubbles: true,
-              cancelable: true,
-            });
-            el.dispatchEvent(event);
-          }
-        },
-        { x, y }
-      );
-
-      await this.wait(0.2);
-
-      const info = await this.getElementInfoAt(x, y);
-
-      return {
-        success: true,
-        data: info,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
   async scrollDocument(
     direction: "up" | "down" | "left" | "right"
   ): Promise<ToolResult> {
@@ -230,11 +117,25 @@ export class ComputerUseActions {
 
       await this.wait(0.3);
 
+      const visibleLinks = await page.evaluate(() => {
+        const links = Array.from(
+          document.querySelectorAll("a[href]")
+        ) as HTMLAnchorElement[];
+        return links
+          .filter((el) => {
+            const rect = el.getBoundingClientRect();
+            return rect.top >= 0 && rect.bottom <= window.innerHeight;
+          })
+          .slice(0, 20)
+          .map((el) => ({ text: el.textContent?.trim(), href: el.href }));
+      });
+
       return {
         success: true,
         data: {
           method: "scroll",
           direction: direction,
+          visibleLinks,
         },
       };
     } catch (error) {
@@ -250,8 +151,6 @@ export class ComputerUseActions {
       const { x, y, direction } = params;
       const page = await this.getStagehandPage();
 
-      const { x: denormX, y: denormY } = await this.denormalizeCoords(x, y);
-
       const viewport = await this.getViewportSize();
       const scrollAmount =
         (params.magnitude || 1) *
@@ -261,25 +160,25 @@ export class ComputerUseActions {
       let deltaX = 0;
       let deltaY = 0;
 
-      if (direction === "down") {
-        deltaY = scrollAmount;
-      } else if (direction === "up") {
-        deltaY = -scrollAmount;
-      } else if (direction === "right") {
-        deltaX = scrollAmount;
-      } else {
-        deltaX = -scrollAmount;
-      }
+      if (direction === "down") deltaY = scrollAmount;
+      else if (direction === "up") deltaY = -scrollAmount;
+      else if (direction === "right") deltaX = scrollAmount;
+      else deltaX = -scrollAmount;
 
-      await page.scroll(denormX, denormY, deltaX, deltaY);
+      // x/y are already pixel coords from Stagehand's CUA layer
+      const scrollX =
+        typeof x === "number" ? x : Math.round(viewport.width / 2);
+      const scrollY =
+        typeof y === "number" ? y : Math.round(viewport.height / 2);
 
+      await page.scroll(scrollX, scrollY, deltaX, deltaY);
       await this.wait(0.3);
 
       return {
         success: true,
         data: {
           method: "scroll",
-          direction: direction,
+          direction,
         },
       };
     } catch (error) {
@@ -312,7 +211,8 @@ export class ComputerUseActions {
 
   async captureScreenshot(): Promise<Buffer> {
     const page = await this.getStagehandPage();
-    return await page.screenshot();
+    // Use CSS scale to match Stagehand's coordinate system
+    return await page.screenshot({ fullPage: false, scale: "css" });
   }
 
   async getCurrentUrl(): Promise<string> {
@@ -412,37 +312,6 @@ export class ComputerUseActions {
       await page.waitForLoadState("networkidle", 2000);
     } catch {
       await this.wait(0.3);
-    }
-  }
-
-  private async getElementInfoAt(
-    x: number,
-    y: number
-  ): Promise<Record<string, any>> {
-    try {
-      const page = await this.getStagehandPage();
-      return await page.evaluate(
-        (coords) => {
-          const el = document.elementFromPoint(
-            coords.x,
-            coords.y
-          ) as HTMLElement | null;
-          if (!el) return { tagName: "unknown" };
-          const anchorEl = el.closest("a") as HTMLAnchorElement | null;
-          const anchor =
-            (el as HTMLAnchorElement).href || anchorEl?.href || undefined;
-          return {
-            tagName: el.tagName,
-            id: el.id || undefined,
-            className: el.className || undefined,
-            text: el.innerText?.slice(0, 50),
-            href: anchor,
-          };
-        },
-        { x, y }
-      );
-    } catch {
-      return { tagName: "unknown" };
     }
   }
 

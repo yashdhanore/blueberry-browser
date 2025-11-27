@@ -1,5 +1,3 @@
-export const COORDINATE_RANGE = 1000;
-
 /**
  * Possible states of the agent during task execution
  */
@@ -136,14 +134,6 @@ export interface ToolResult {
   success: boolean;
   error?: string;
   data?: any;
-}
-
-export interface TypeParams {
-  x: number;
-  y: number;
-  text: string;
-  pressEnter?: boolean;
-  clearFirst?: boolean;
 }
 
 export interface ScrollAtParams {

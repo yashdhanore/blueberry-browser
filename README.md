@@ -44,9 +44,16 @@ The implementation is designed to be:
   - Orchestrates a **single agent run**: tracks goal, turns, state and errors via a `ContextManager`.
   - Binds Stagehand to the **active page** (filters out `chrome://`, devtools, and internal topbar/sidebar pages).
   - Configures the Gemini CU model with a **system prompt** that:
-    - Keeps the agent focused on the user’s goal.
-    - uses a selector-based tools over raw coordinates.
+    - Keeps the agent focused on the user's goal.
+    - Prefers `act_instruction` tool (observe→act pattern) for natural language interactions.
+    - Falls back to selector-based tools (`click_selector`, `fill_selector`, etc.) when precise control is needed.
   - Records all actions and a final summary into the context, captures **before/after screenshots**, and emits high‑level events the UI can consume.
+
+- **`StagehandActExecutor` (main process, `src/main/agent/StagehandActExecutor.ts`)**
+  - Wraps Stagehand's `observe()` and `act()` APIs for deterministic, self-healing browser automation.
+  - Implements the **observe→act pattern**: first observes candidate actions for an instruction, then executes the chosen action deterministically (without additional LLM calls).
+  - Provides `actAfterObserve()` convenience method that combines both steps with automatic fallback to direct execution if observation fails.
+  - Normalizes return values into `ActResultSummary` for consistent logging and error handling.
 
 - **`ComputerUseActions` (main process, `src/main/agent/ComputerUseActions.ts`)**
   - Thin abstraction over the Stagehand **page** for low-level browser control and observation.
@@ -135,6 +142,52 @@ LLM_MODEL=gpt-4o-mini
    - Open Blueberry and toggle the sidebar (⌘E as hinted in the UI).
    - Use the chat to describe your goal; when the main process chooses to run a browser agent for that goal, the **Browser Agent** card will appear and stream progress.
 
+### Using the observe→act pattern
+
+The agent automatically uses Stagehand's observe→act pattern for browser interactions. Here's how it works:
+
+**Example: Clicking a button**
+
+When you ask the agent to "click the login button", it will:
+
+1. **Observe**: Stagehand analyzes the page and identifies candidate actions:
+
+   ```typescript
+   [
+     {
+       selector: "xpath=/html[1]/body[1]/div[1]/button[1]",
+       description: "Login button",
+       method: "click",
+       arguments: [],
+     },
+   ];
+   ```
+
+2. **Act**: The chosen action is executed deterministically (no additional LLM call):
+   ```typescript
+   await stagehand.act(observedAction[0]);
+   ```
+
+**Benefits:**
+
+- **Self-healing**: Actions adapt automatically when websites change
+- **Cost reduction**: Cached actions can be reused without LLM calls
+- **Deterministic execution**: Once observed, actions execute consistently
+- **Natural language**: Write automation in plain English, no selectors needed
+
+**Manual verification:**
+
+To verify the observe→act pattern is working:
+
+1. Start the agent with a simple goal like "click the login button"
+2. Check the console logs for messages like:
+   ```
+   [StagehandActExecutor] Executing observed action: Login button
+   ```
+3. The agent activity card should show successful action execution with the observed selector and description
+
+The `act_instruction` tool is automatically available to the agent and is preferred over raw selector tools when the agent wants natural language interactions with automatic adaptation.
+
 ### Design decisions & tradeoffs
 
 - **Explicit orchestration layer**
@@ -153,11 +206,18 @@ LLM_MODEL=gpt-4o-mini
   - All agent updates are modelled as **events** (`agent-update` IPC) instead of request/response calls.
   - This lines up naturally with long‑running CU sessions and keeps the React tree in sync via a single `ChatContext`.
 
-- **Selector‑first, coordinate‑second interactions**
-  - The system prompt nudges the Stagehand client to use **selector‑based tools** defined in `src/main/agent/LocatorTools.ts` when possible, with normalized coordinate tools as a fallback.
-  - `LocatorTools` wraps Stagehand’s locator API in a small, typed toolset (click, fill, type, press keys) with Zod schemas, so Gemini issues structured, validated tool calls instead of low‑level page scripting.
-  - This reduces coordinate drift, makes actions more explainable, and lets us adapt tool behaviour to Blueberry’s needs without changing the agent wiring.
-  - This balances robustness (less coordinate drift) with flexibility (still able to click arbitrary locations when needed).
+- **Observe→Act pattern for self-healing automation**
+  - The agent uses Stagehand's **observe→act pattern** via the `act_instruction` tool for natural language browser interactions.
+  - When the agent calls `act_instruction` with an instruction like "click the login button":
+    1. **Observe phase**: Stagehand analyzes the page and returns candidate actions (with selector, description, method).
+    2. **Act phase**: The chosen action is executed deterministically without additional LLM calls.
+  - This pattern provides **self-healing behavior**: actions automatically adapt when websites change, and cached actions can be reused across runs to reduce costs.
+  - The `StagehandActExecutor` helper manages this flow, falling back to direct execution if observation fails.
+
+- **Selector‑based tools for precise control**
+  - For cases where the agent has a stable CSS/XPath selector, it can use **selector‑based tools** (`click_selector`, `fill_selector`, `type_selector`, `press_keys`) defined in `src/main/agent/LocatorTools.ts`.
+  - These tools wrap Stagehand's locator API with Zod schemas, ensuring structured, validated tool calls.
+  - This balances robustness (less coordinate drift) with flexibility (still able to click arbitrary locations when needed via `act_instruction`).
 
 - **Single agent today, multi‑agent ready**
   - The current implementation runs a single Stagehand agent configured for general browser automation.
