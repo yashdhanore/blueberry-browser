@@ -142,52 +142,6 @@ LLM_MODEL=gpt-4o-mini
    - Open Blueberry and toggle the sidebar (⌘E as hinted in the UI).
    - Use the chat to describe your goal; when the main process chooses to run a browser agent for that goal, the **Browser Agent** card will appear and stream progress.
 
-### Using the observe→act pattern
-
-The agent automatically uses Stagehand's observe→act pattern for browser interactions. Here's how it works:
-
-**Example: Clicking a button**
-
-When you ask the agent to "click the login button", it will:
-
-1. **Observe**: Stagehand analyzes the page and identifies candidate actions:
-
-   ```typescript
-   [
-     {
-       selector: "xpath=/html[1]/body[1]/div[1]/button[1]",
-       description: "Login button",
-       method: "click",
-       arguments: [],
-     },
-   ];
-   ```
-
-2. **Act**: The chosen action is executed deterministically (no additional LLM call):
-   ```typescript
-   await stagehand.act(observedAction[0]);
-   ```
-
-**Benefits:**
-
-- **Self-healing**: Actions adapt automatically when websites change
-- **Cost reduction**: Cached actions can be reused without LLM calls
-- **Deterministic execution**: Once observed, actions execute consistently
-- **Natural language**: Write automation in plain English, no selectors needed
-
-**Manual verification:**
-
-To verify the observe→act pattern is working:
-
-1. Start the agent with a simple goal like "click the login button"
-2. Check the console logs for messages like:
-   ```
-   [StagehandActExecutor] Executing observed action: Login button
-   ```
-3. The agent activity card should show successful action execution with the observed selector and description
-
-The `act_instruction` tool is automatically available to the agent and is preferred over raw selector tools when the agent wants natural language interactions with automatic adaptation.
-
 ### Design decisions & tradeoffs
 
 - **Explicit orchestration layer**
@@ -206,7 +160,7 @@ The `act_instruction` tool is automatically available to the agent and is prefer
   - All agent updates are modelled as **events** (`agent-update` IPC) instead of request/response calls.
   - This lines up naturally with long‑running CU sessions and keeps the React tree in sync via a single `ChatContext`.
 
-- **Observe→Act pattern for self-healing automation**
+- **Observe→Act pattern for self-healing**
   - The agent uses Stagehand's **observe→act pattern** via the `act_instruction` tool for natural language browser interactions.
   - When the agent calls `act_instruction` with an instruction like "click the login button":
     1. **Observe phase**: Stagehand analyzes the page and returns candidate actions (with selector, description, method).
