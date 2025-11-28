@@ -26,7 +26,6 @@ export class ContextManager extends EventEmitter {
       timeout: config?.timeout || 5 * 60 * 1000, // 5 minutes
     };
 
-    // Initialize with empty context
     this.context = this.createEmptyContext();
   }
   startTask(goal: string): void {
@@ -104,7 +103,6 @@ export class ContextManager extends EventEmitter {
     this.setState(AgentState.IDLE);
     this.emit("taskCancelled", this.getContext());
 
-    // Reset to empty context
     this.context = this.createEmptyContext();
   }
 

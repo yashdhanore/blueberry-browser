@@ -15,7 +15,6 @@ export class SideBar {
     baseWindow.contentView.addChildView(this.webContentsView);
     this.setupBounds();
 
-    // Initialize LLM client
     this.llmClient = new LLMClient(this.webContentsView.webContents);
   }
 
@@ -29,7 +28,6 @@ export class SideBar {
       },
     });
 
-    // Load the Sidebar React app
     if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
       // In development, load through Vite dev server
       const sidebarUrl = new URL(

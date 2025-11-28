@@ -13,7 +13,6 @@ export class Window {
   private _isAgentInteractionLocked: boolean = false;
 
   constructor() {
-    // Create the browser window.
     this._baseWindow = new BaseWindow({
       width: 1288,
       height: 799,
@@ -29,18 +28,14 @@ export class Window {
     this._topBar = new TopBar(this._baseWindow);
     this._sideBar = new SideBar(this._baseWindow);
 
-    // Set the window reference on the LLM client to avoid circular dependency
     this._sideBar.client.setWindow(this);
 
-    // Create the first tab
     this.createTab();
 
-    // Set up window resize handler
     this._baseWindow.on("resize", () => {
       this.updateTabBounds();
       this._topBar.updateBounds();
       this._sideBar.updateBounds();
-      // Notify renderer of resize through active tab
       const bounds = this._baseWindow.getBounds();
       if (this.activeTab) {
         this.activeTab.webContents.send("window-resized", {
@@ -50,7 +45,6 @@ export class Window {
       }
     });
 
-    // Handle external link opening
     this.tabsMap.forEach((tab) => {
       tab.webContents.setWindowOpenHandler((details) => {
         shell.openExternal(details.url);
@@ -63,13 +57,11 @@ export class Window {
 
   private setupEventListeners(): void {
     this._baseWindow.on("closed", () => {
-      // Clean up all tabs when window is closed
       this.tabsMap.forEach((tab) => tab.destroy());
       this.tabsMap.clear();
     });
   }
 
-  // Getters
   get window(): BaseWindow {
     return this._baseWindow;
   }
@@ -89,31 +81,24 @@ export class Window {
     return this.tabsMap.size;
   }
 
-  // Tab management methods
   createTab(url?: string): Tab {
     const tabId = `tab-${++this.tabCounter}`;
     const tab = new Tab(tabId, url);
 
-    // Add the tab's WebContentsView to the window
     this._baseWindow.contentView.addChildView(tab.view);
 
-    // Set the bounds to fill the window below the topbar and to the left of sidebar
     const contentBounds = this.getContentBounds();
     tab.view.setBounds(contentBounds);
 
-    // Store the tab
     this.tabsMap.set(tabId, tab);
 
-    // If the agent currently has control, ensure this tab is also locked
     if (this._isAgentInteractionLocked) {
       tab.setInteractionLocked(true);
     }
 
-    // If this is the first tab, make it active
     if (this.tabsMap.size === 1) {
       this.switchActiveTab(tabId);
     } else {
-      // Hide the tab initially if it's not the first one
       tab.hide();
     }
 
@@ -126,16 +111,12 @@ export class Window {
       return false;
     }
 
-    // Remove the WebContentsView from the window
     this._baseWindow.contentView.removeChildView(tab.view);
 
-    // Destroy the tab
     tab.destroy();
 
-    // Remove from our tabs map
     this.tabsMap.delete(tabId);
 
-    // If this was the active tab, switch to another tab
     if (this.activeTabId === tabId) {
       this.activeTabId = null;
       const remainingTabs = Array.from(this.tabsMap.keys());
@@ -144,7 +125,6 @@ export class Window {
       }
     }
 
-    // If no tabs left, close the window
     if (this.tabsMap.size === 0) {
       this._baseWindow.close();
     }
@@ -158,7 +138,6 @@ export class Window {
       return false;
     }
 
-    // Hide the currently active tab
     if (this.activeTabId && this.activeTabId !== tabId) {
       const currentTab = this.tabsMap.get(this.activeTabId);
       if (currentTab) {
@@ -166,14 +145,11 @@ export class Window {
       }
     }
 
-    // Show the new active tab
     tab.show();
     this.activeTabId = tabId;
 
-    // Ensure interaction lock state is applied to the active tab
     tab.setInteractionLocked(this._isAgentInteractionLocked);
 
-    // Update the window title to match the tab title
     this._baseWindow.setTitle(tab.title || "Blueberry Browser");
 
     return true;
@@ -183,7 +159,6 @@ export class Window {
     return this.tabsMap.get(tabId) || null;
   }
 
-  // Window methods
   show(): void {
     this._baseWindow.show();
   }
@@ -233,7 +208,6 @@ export class Window {
     return this._baseWindow.getBounds();
   }
 
-  // Handle window resize to update tab bounds
   private updateTabBounds(): void {
     const contentBounds = this.getContentBounds();
 
@@ -242,33 +216,27 @@ export class Window {
     });
   }
 
-  // Public method to update all bounds when sidebar is toggled
   updateAllBounds(): void {
     this.updateTabBounds();
     this._sideBar.updateBounds();
   }
 
-  // Getter for sidebar to access from main process
   get sidebar(): SideBar {
     return this._sideBar;
   }
 
-  // Getter for topBar to access from main process
   get topBar(): TopBar {
     return this._topBar;
   }
 
-  // Getter for all tabs as array
   get tabs(): Tab[] {
     return Array.from(this.tabsMap.values());
   }
 
-  // Getter for baseWindow to access from Menu
   get baseWindow(): BaseWindow {
     return this._baseWindow;
   }
 
-  // Agent interaction lock controls
   setAgentInteractionLocked(locked: boolean): void {
     this._isAgentInteractionLocked = locked;
 

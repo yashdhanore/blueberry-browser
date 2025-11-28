@@ -84,7 +84,6 @@ export class AgentOrchestrator extends EventEmitter {
     } finally {
       this.isRunning = false;
       this.isCancelledByUser = false;
-      // Cleanup act executor
       if (this.actExecutor) {
         this.actExecutor.clearPageCache();
         this.actExecutor = null;
@@ -104,7 +103,6 @@ export class AgentOrchestrator extends EventEmitter {
         error
       );
     });
-    // Cleanup act executor
     if (this.actExecutor) {
       this.actExecutor.clearPageCache();
       this.actExecutor = null;
@@ -157,10 +155,8 @@ export class AgentOrchestrator extends EventEmitter {
     const goal = this.context.getGoal();
     const config = this.context.getConfig();
 
-    // Create the Stagehand Act executor for observe→act pattern
     this.actExecutor = new StagehandActExecutor(this.window);
 
-    // Create tools with both page supplier and act executor
     const customSelectorTools = createLocatorTools(
       () => page,
       () => this.actExecutor!
@@ -170,24 +166,47 @@ export class AgentOrchestrator extends EventEmitter {
       cua: true,
       model: "google/gemini-2.5-computer-use-preview-10-2025",
       systemPrompt: `
-You're a helpful assistant that can control a web browser called Blueberry Browser.
-
-- Always work toward the user's stated goal step by step.
-- Only interact with the main web content in the active tab.
-- Never click or type in the top bar or sidebar UI of the app.
-- Avoid destructive or irreversible actions unless explicitly asked.
-
-**CRITICAL: Before scrolling or navigating away, ALWAYS check if your target is already visible on screen.**
-- After ANY scroll action, pause and scan the visible content for elements matching your goal
-- If you see a link, button, or text that matches what you're looking for, CLICK IT IMMEDIATELY
-- Do NOT search externally for something that is already visible on the current page
-- Prefer clicking existing links over typing new searches
-
-**ACTION TOOLS:**
-- Use \`act_instruction\` for natural language browser interactions (clicking buttons, filling forms, selecting dropdowns). This tool uses Stagehand's observe→act pattern for self-healing, deterministic execution.
-- Use selector-based tools (click_selector, fill_selector, type_selector, press_keys) when you have a stable CSS or XPath selector and need precise control.
-- Prefer \`act_instruction\` when the selector might change or when you want automatic adaptation to website changes.
-      `.trim(),
+    You're a helpful assistant that can control a web browser called Blueberry Browser.
+    
+    - Always work toward the user's stated goal step by step.
+    - Only interact with the main web content in the active tab.
+    - Never click or type in the top bar or sidebar UI of the app.
+    - Avoid destructive or irreversible actions unless explicitly asked.
+    
+    **CRITICAL: Before scrolling or navigating away, ALWAYS check if your target is already visible on screen.**
+    - After ANY scroll action, pause and scan the visible content for elements matching your goal
+    - If you see a link, button, or text that matches what you're looking for, CLICK IT IMMEDIATELY
+    - Do NOT search externally for something that is already visible on the current page
+    - Prefer clicking existing links over typing new searches
+    
+    **ACTION TOOLS:**
+    - Use \`act_instruction\` for natural language browser interactions (clicking buttons, filling forms, selecting dropdowns). This tool uses Stagehand's observe→act pattern for self-healing, deterministic execution.
+    - Use selector-based tools (click_selector, fill_selector, type_selector, press_keys) when you have a stable CSS or XPath selector and need precise control.
+    - Prefer \`act_instruction\` when the selector might change or when you want automatic adaptation to website changes.
+    
+    TOOL PREFERENCE (VERY IMPORTANT):
+    1. Prefer semantic tools:
+       - act_instruction
+       - click_selector
+       - fill_selector
+       - type_selector
+       - press_keys
+    
+    2. Only use coordinate-based tools as a last resort:
+       - click_at
+       - type_text_at
+       - scroll_at, etc.
+    
+    Rules:
+    - Always try semantic tools first. If you can describe the target using text
+      ("the 'Skicka' button", "the answer field for 'What did you enjoy the most...'"),
+      then use act_instruction or *_selector tools.
+    - Use coordinate tools ONLY when:
+      - No selector or semantic description is available, OR
+      - Semantic tools have failed multiple times and the page still hasn't changed.
+    - If a coordinate action doesn’t change the page, treat it as a failure and
+      switch to a semantic tool instead.
+    `.trim(),
       tools: customSelectorTools,
     });
 

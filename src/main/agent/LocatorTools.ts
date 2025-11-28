@@ -65,12 +65,30 @@ export const createLocatorTools = (
       execute: async (args) => {
         const parsed = clickSchema.parse(args);
         const page = await resolvePage(pageSupplier);
-        const locator = await resolveLocator(page, parsed.selector);
 
-        await locator.click({
-          button: parsed.button ?? "left",
-          clickCount: parsed.clickCount ?? 1,
-        });
+        await page.evaluate((sel) => {
+          let el: Element | null = null;
+
+          if (sel.startsWith("xpath=")) {
+            const xpath = sel.slice("xpath=".length);
+            const result = document.evaluate(
+              xpath,
+              document,
+              null,
+              XPathResult.FIRST_ORDERED_NODE_TYPE,
+              null
+            );
+            el = result.singleNodeValue as Element | null;
+          } else {
+            el = document.querySelector(sel);
+          }
+
+          if (!el) {
+            throw new Error(`No element found for selector: ${sel}`);
+          }
+
+          (el as HTMLElement).click();
+        }, parsed.selector);
 
         return {
           selector: parsed.selector,
@@ -161,7 +179,6 @@ export const createLocatorTools = (
         }
 
         try {
-          // Use observe→act pattern for deterministic execution
           const result = await executor.actAfterObserve(parsed.instruction, {
             variables: parsed.variables as Record<string, string> | undefined,
             timeout: parsed.timeout,

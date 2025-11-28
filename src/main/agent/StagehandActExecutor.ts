@@ -126,7 +126,6 @@ export class StagehandActExecutor {
     options?: Omit<ActOptions, "page">
   ): Promise<ActResultSummary> {
     try {
-      // First, observe to get the action plan
       const observedActions = await this.observe(instruction, options);
 
       if (observedActions.length > 0) {
@@ -136,7 +135,6 @@ export class StagehandActExecutor {
           `[StagehandActExecutor] Executing observed action: ${first.description}`
         );
 
-        // If it's a click with a selector, do a pure DOM click
         if (first.method === "click" && first.selector) {
           try {
             await this.domClick(first.selector);
@@ -152,22 +150,18 @@ export class StagehandActExecutor {
             console.warn(
               `[StagehandActExecutor] DOM click failed for selector ${first.selector}, falling back to stagehand.act: ${msg}`
             );
-            // Fallback to Stagehand's own act if DOM click fails
             return await this.act(first, options);
           }
         }
 
-        // Non-click actions (e.g., fill) still go through Stagehand
         return await this.act(first, options);
       } else {
-        // Fallback: execute the instruction directly if observation returned nothing
         console.warn(
           `[StagehandActExecutor] No actions observed, executing instruction directly: ${instruction}`
         );
         return await this.act(instruction, options);
       }
     } catch (error) {
-      // If observation fails, fall back to direct execution
       console.warn(
         `[StagehandActExecutor] Observe failed, falling back to direct act: ${instruction}`,
         error
@@ -200,7 +194,6 @@ export class StagehandActExecutor {
         throw new Error(`No element found for selector: ${sel}`);
       }
 
-      // For Google Forms stars/radios, clicking the label/div is enough
       (el as HTMLElement).click();
     }, selector);
   }
