@@ -103,7 +103,6 @@ export class AppMenu {
     Menu.setApplicationMenu(menu);
   }
 
-  // Menu action handlers
   private handleNewTab(): void {
     this.mainWindow.createTab("https://www.google.com");
   }

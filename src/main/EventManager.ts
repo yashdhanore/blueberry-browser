@@ -17,46 +17,29 @@ export class EventManager {
   }
 
   private setupEventHandlers(): void {
-    // Tab management events
     this.handleTabEvents();
-
-    // Sidebar events
     this.handleSidebarEvents();
-
-    // Page content events
     this.handlePageContentEvents();
-
-    // Dark mode events
     this.handleDarkModeEvents();
-
-    // Debug events
     this.handleDebugEvents();
-
-    // Agent events
     this.handleAgentEvents();
-
-    // Stagehand helper events (quickstart-style helpers)
     this.handleStagehandHelperEvents();
   }
 
   private handleTabEvents(): void {
-    // Create new tab
     ipcMain.handle("create-tab", (_, url?: string) => {
       const newTab = this.mainWindow.createTab(url);
       return { id: newTab.id, title: newTab.title, url: newTab.url };
     });
 
-    // Close tab
     ipcMain.handle("close-tab", (_, id: string) => {
       this.mainWindow.closeTab(id);
     });
 
-    // Switch tab
     ipcMain.handle("switch-tab", (_, id: string) => {
       this.mainWindow.switchActiveTab(id);
     });
 
-    // Get tabs
     ipcMain.handle("get-tabs", () => {
       const activeTabId = this.mainWindow.activeTab?.id;
       return this.mainWindow.allTabs.map((tab) => ({
@@ -67,7 +50,6 @@ export class EventManager {
       }));
     });
 
-    // Navigation (for compatibility with existing code)
     ipcMain.handle("navigate-to", (_, url: string) => {
       if (this.mainWindow.activeTab) {
         this.mainWindow.activeTab.loadURL(url);
@@ -101,7 +83,6 @@ export class EventManager {
       }
     });
 
-    // Tab-specific navigation handlers
     ipcMain.handle("tab-go-back", (_, tabId: string) => {
       const tab = this.mainWindow.getTab(tabId);
       if (tab) {
@@ -146,7 +127,6 @@ export class EventManager {
       return null;
     });
 
-    // Tab info
     ipcMain.handle("get-active-tab-info", () => {
       const activeTab = this.mainWindow.activeTab;
       if (activeTab) {
@@ -163,39 +143,38 @@ export class EventManager {
   }
 
   private handleSidebarEvents(): void {
-    // Toggle sidebar
     ipcMain.handle("toggle-sidebar", () => {
       this.mainWindow.sidebar.toggle();
       this.mainWindow.updateAllBounds();
       return true;
     });
 
-    // Chat message
     ipcMain.handle("sidebar-chat-message", async (_, request) => {
       await this.mainWindow.sidebar.client.sendChatMessage(request);
     });
 
-    // Clear chat
     ipcMain.handle("sidebar-clear-chat", () => {
       this.mainWindow.sidebar.client.clearMessages();
       return true;
     });
 
-    // Get messages
     ipcMain.handle("sidebar-get-messages", () => {
       return this.mainWindow.sidebar.client.getMessages();
     });
 
-    ipcMain.handle("sidebar-get-smart-suggestions", async (_, count?: number) => {
-      try {
-        return await this.mainWindow.sidebar.client.generateSmartSuggestions(
-          typeof count === "number" ? count : undefined
-        );
-      } catch (error) {
-        console.warn("Failed to fetch smart suggestions:", error);
-        return [];
+    ipcMain.handle(
+      "sidebar-get-smart-suggestions",
+      async (_, count?: number) => {
+        try {
+          return await this.mainWindow.sidebar.client.generateSmartSuggestions(
+            typeof count === "number" ? count : undefined
+          );
+        } catch (error) {
+          console.warn("Failed to fetch smart suggestions:", error);
+          return [];
+        }
       }
-    });
+    );
   }
 
   /**
@@ -236,7 +215,6 @@ export class EventManager {
   }
 
   private handlePageContentEvents(): void {
-    // Get page content
     ipcMain.handle("get-page-content", async () => {
       if (this.mainWindow.activeTab) {
         try {
@@ -249,7 +227,6 @@ export class EventManager {
       return null;
     });
 
-    // Get page text
     ipcMain.handle("get-page-text", async () => {
       if (this.mainWindow.activeTab) {
         try {
@@ -262,7 +239,6 @@ export class EventManager {
       return null;
     });
 
-    // Get current URL
     ipcMain.handle("get-current-url", () => {
       if (this.mainWindow.activeTab) {
         return this.mainWindow.activeTab.url;
@@ -272,14 +248,12 @@ export class EventManager {
   }
 
   private handleDarkModeEvents(): void {
-    // Dark mode broadcasting
     ipcMain.on("dark-mode-changed", (event, isDarkMode) => {
       this.broadcastDarkMode(event.sender, isDarkMode);
     });
   }
 
   private handleDebugEvents(): void {
-    // Ping test
     ipcMain.on("ping", () => console.log("pong"));
   }
 
@@ -313,7 +287,6 @@ export class EventManager {
   }
 
   private broadcastDarkMode(sender: WebContents, isDarkMode: boolean): void {
-    // Send to topbar
     if (this.mainWindow.topBar.view.webContents !== sender) {
       this.mainWindow.topBar.view.webContents.send(
         "dark-mode-updated",
@@ -321,7 +294,6 @@ export class EventManager {
       );
     }
 
-    // Send to sidebar
     if (this.mainWindow.sidebar.view.webContents !== sender) {
       this.mainWindow.sidebar.view.webContents.send(
         "dark-mode-updated",
@@ -329,7 +301,6 @@ export class EventManager {
       );
     }
 
-    // Send to all tabs
     this.mainWindow.allTabs.forEach((tab) => {
       if (tab.webContents !== sender) {
         tab.webContents.send("dark-mode-updated", isDarkMode);
@@ -337,7 +308,6 @@ export class EventManager {
     });
   }
 
-  // Clean up event listeners
   public cleanup(): void {
     ipcMain.removeAllListeners();
   }

@@ -44,9 +44,16 @@ The implementation is designed to be:
   - Orchestrates a **single agent run**: tracks goal, turns, state and errors via a `ContextManager`.
   - Binds Stagehand to the **active page** (filters out `chrome://`, devtools, and internal topbar/sidebar pages).
   - Configures the Gemini CU model with a **system prompt** that:
-    - Keeps the agent focused on the user’s goal.
-    - uses a selector-based tools over raw coordinates.
+    - Keeps the agent focused on the user's goal.
+    - Prefers `act_instruction` tool (observe→act pattern) for natural language interactions.
+    - Falls back to selector-based tools (`click_selector`, `fill_selector`, etc.) when precise control is needed.
   - Records all actions and a final summary into the context, captures **before/after screenshots**, and emits high‑level events the UI can consume.
+
+- **`StagehandActExecutor` (main process, `src/main/agent/StagehandActExecutor.ts`)**
+  - Wraps Stagehand's `observe()` and `act()` APIs for deterministic, self-healing browser automation.
+  - Implements the **observe→act pattern**: first observes candidate actions for an instruction, then executes the chosen action deterministically (without additional LLM calls).
+  - Provides `actAfterObserve()` convenience method that combines both steps with automatic fallback to direct execution if observation fails.
+  - Normalizes return values into `ActResultSummary` for consistent logging and error handling.
 
 - **`ComputerUseActions` (main process, `src/main/agent/ComputerUseActions.ts`)**
   - Thin abstraction over the Stagehand **page** for low-level browser control and observation.
@@ -153,11 +160,18 @@ LLM_MODEL=gpt-4o-mini
   - All agent updates are modelled as **events** (`agent-update` IPC) instead of request/response calls.
   - This lines up naturally with long‑running CU sessions and keeps the React tree in sync via a single `ChatContext`.
 
-- **Selector‑first, coordinate‑second interactions**
-  - The system prompt nudges the Stagehand client to use **selector‑based tools** defined in `src/main/agent/LocatorTools.ts` when possible, with normalized coordinate tools as a fallback.
-  - `LocatorTools` wraps Stagehand’s locator API in a small, typed toolset (click, fill, type, press keys) with Zod schemas, so Gemini issues structured, validated tool calls instead of low‑level page scripting.
-  - This reduces coordinate drift, makes actions more explainable, and lets us adapt tool behaviour to Blueberry’s needs without changing the agent wiring.
-  - This balances robustness (less coordinate drift) with flexibility (still able to click arbitrary locations when needed).
+- **Observe→Act pattern for self-healing**
+  - The agent uses Stagehand's **observe→act pattern** via the `act_instruction` tool for natural language browser interactions.
+  - When the agent calls `act_instruction` with an instruction like "click the login button":
+    1. **Observe phase**: Stagehand analyzes the page and returns candidate actions (with selector, description, method).
+    2. **Act phase**: The chosen action is executed deterministically without additional LLM calls.
+  - This pattern provides **self-healing behavior**: actions automatically adapt when websites change, and cached actions can be reused across runs to reduce costs.
+  - The `StagehandActExecutor` helper manages this flow, falling back to direct execution if observation fails.
+
+- **Selector‑based tools for precise control**
+  - For cases where the agent has a stable CSS/XPath selector, it can use **selector‑based tools** (`click_selector`, `fill_selector`, `type_selector`, `press_keys`) defined in `src/main/agent/LocatorTools.ts`.
+  - These tools wrap Stagehand's locator API with Zod schemas, ensuring structured, validated tool calls.
+  - This balances robustness (less coordinate drift) with flexibility (still able to click arbitrary locations when needed via `act_instruction`).
 
 - **Single agent today, multi‑agent ready**
   - The current implementation runs a single Stagehand agent configured for general browser automation.

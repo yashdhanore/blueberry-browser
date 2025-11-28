@@ -23,7 +23,6 @@ export class TopBar {
       },
     });
 
-    // Load the TopBar React app
     if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
       // In development, load through Vite dev server
       const topbarUrl = new URL(

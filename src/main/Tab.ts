@@ -13,7 +13,6 @@ export class Tab {
     this._url = url;
     this._title = "New Tab";
 
-    // Create the WebContentsView for web content only
     this.webContentsView = new WebContentsView({
       webPreferences: {
         nodeIntegration: false,
@@ -23,20 +22,16 @@ export class Tab {
       },
     });
 
-    // Set up event listeners
     this.setupEventListeners();
 
-    // Load the initial URL
     this.loadURL(url);
   }
 
   private setupEventListeners(): void {
-    // Update title when page title changes
     this.webContentsView.webContents.on("page-title-updated", (_, title) => {
       this._title = title;
     });
 
-    // Update URL when navigation occurs
     this.webContentsView.webContents.on("did-navigate", (_, url) => {
       this._url = url;
       if (this._isInteractionLocked) {
@@ -51,7 +46,6 @@ export class Tab {
       }
     });
 
-    // Prevent user interaction when this tab is locked (e.g. while the agent is running)
     this.webContentsView.webContents.on("before-input-event", (event) => {
       if (this.shouldBlockUserInteraction()) {
         event.preventDefault();
@@ -65,7 +59,6 @@ export class Tab {
     });
   }
 
-  // Getters
   get id(): string {
     return this._id;
   }
@@ -94,7 +87,6 @@ export class Tab {
     return this.webContentsView;
   }
 
-  // Public methods
   show(): void {
     this._isVisible = true;
     this.webContentsView.setVisible(true);

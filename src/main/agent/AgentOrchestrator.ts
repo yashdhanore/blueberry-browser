@@ -14,6 +14,7 @@ import {
   AgentErrorCode,
 } from "./ComputerUseTypes";
 import { createLocatorTools } from "./LocatorTools";
+import { StagehandActExecutor } from "./StagehandActExecutor";
 
 interface StagehandProvider {
   getStagehand(): Promise<any>;
@@ -28,6 +29,7 @@ export class AgentOrchestrator extends EventEmitter {
   private stagehandService: StagehandProvider;
   private isRunning: boolean = false;
   private isCancelledByUser: boolean = false;
+  private actExecutor: StagehandActExecutor | null = null;
 
   constructor(window: Window, stagehandService: StagehandProvider) {
     super();
@@ -70,9 +72,12 @@ export class AgentOrchestrator extends EventEmitter {
           "[AgentOrchestrator] Agent task was cancelled by the user."
         );
       } else {
-        console.error("Agent error:", error);
         const errorMessage =
           error instanceof Error ? error.message : String(error);
+        console.error(
+          `[AgentOrchestrator] Agent task failed: ${errorMessage}`,
+          error
+        );
         this.context.failTask(errorMessage);
         this.emit("error", {
           error: errorMessage,
@@ -82,6 +87,10 @@ export class AgentOrchestrator extends EventEmitter {
     } finally {
       this.isRunning = false;
       this.isCancelledByUser = false;
+      if (this.actExecutor) {
+        this.actExecutor.clearPageCache();
+        this.actExecutor = null;
+      }
     }
   }
 
@@ -97,6 +106,10 @@ export class AgentOrchestrator extends EventEmitter {
         error
       );
     });
+    if (this.actExecutor) {
+      this.actExecutor.clearPageCache();
+      this.actExecutor = null;
+    }
     this.context.cancelTask();
     this.emit("cancelled", {});
   }
@@ -130,14 +143,18 @@ export class AgentOrchestrator extends EventEmitter {
     try {
       page = await this.stagehandService.getPageForActiveTab(this.window);
     } catch (error) {
-      console.warn("Failed to resolve Stagehand page, falling back:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[AgentOrchestrator] Failed to resolve Stagehand page, attempting fallback: ${errorMessage}`
+      );
       const ctx = (stagehand as any).context;
       page = ctx?.activePage?.();
     }
 
     if (!page) {
       throw new AgentError(
-        "No suitable Stagehand page found for agent execution",
+        "No suitable Stagehand page found for agent execution. Ensure a tab is open and loaded.",
         AgentErrorCode.INVALID_STATE
       );
     }
@@ -145,21 +162,65 @@ export class AgentOrchestrator extends EventEmitter {
     const goal = this.context.getGoal();
     const config = this.context.getConfig();
 
-    const customSelectorTools = createLocatorTools(() => page);
+    this.actExecutor = new StagehandActExecutor(this.window);
+
+    const customSelectorTools = createLocatorTools(
+      () => page,
+      () => {
+        if (!this.actExecutor) {
+          throw new Error(
+            "StagehandActExecutor is not available. This should not happen during agent execution."
+          );
+        }
+        return this.actExecutor;
+      }
+    );
 
     const agent = stagehand.agent({
       cua: true,
       model: "google/gemini-2.5-computer-use-preview-10-2025",
       systemPrompt: `
-You're a helpful assistant that can control a web browser called Blueberry Browser.
-
-- Always work toward the user's stated goal step by step.
-- Only interact with the main web content in the active tab.
-- Never click or type in the top bar or sidebar UI of the app.
-- Avoid destructive or irreversible actions (e.g. deleting data, posting content) unless explicitly asked.
-- Prefer clear navigation, reading, searching, and extracting information for the user.
-      - Prefer the custom selector tools (click_selector, fill_selector, type_selector, press_keys) whenever you can identify a stable CSS or XPath selector. This avoids coordinate drift on high-DPI screens.
-      `.trim(),
+    You're a helpful assistant that can control a web browser called Blueberry Browser.
+    
+    - Always work toward the user's stated goal step by step.
+    - Only interact with the main web content in the active tab.
+    - Never click or type in the top bar or sidebar UI of the app.
+    - Avoid destructive or irreversible actions unless explicitly asked.
+    
+    **CRITICAL: Before scrolling or navigating away, ALWAYS check if your target is already visible on screen.**
+    - After ANY scroll action, pause and scan the visible content for elements matching your goal
+    - If you see a link, button, or text that matches what you're looking for, CLICK IT IMMEDIATELY
+    - Do NOT search externally for something that is already visible on the current page
+    - Prefer clicking existing links over typing new searches
+    
+    **ACTION TOOLS:**
+    - Use \`act_instruction\` for natural language browser interactions (clicking buttons, filling forms, selecting dropdowns). This tool uses Stagehand's observe→act pattern for self-healing, deterministic execution.
+    - Use selector-based tools (click_selector, fill_selector, type_selector, press_keys) when you have a stable CSS or XPath selector and need precise control.
+    - Prefer \`act_instruction\` when the selector might change or when you want automatic adaptation to website changes.
+    
+    TOOL PREFERENCE (VERY IMPORTANT):
+    1. Prefer semantic tools:
+       - act_instruction
+       - click_selector
+       - fill_selector
+       - type_selector
+       - press_keys
+    
+    2. Only use coordinate-based tools as a last resort:
+       - click_at
+       - type_text_at
+       - scroll_at, etc.
+    
+    Rules:
+    - Always try semantic tools first. If you can describe the target using text
+      ("the 'Skicka' button", "the answer field for 'What did you enjoy the most...'"),
+      then use act_instruction or *_selector tools.
+    - Use coordinate tools ONLY when:
+      - No selector or semantic description is available, OR
+      - Semantic tools have failed multiple times and the page still hasn't changed.
+    - If a coordinate action doesn’t change the page, treat it as a failure and
+      switch to a semantic tool instead.
+    `.trim(),
       tools: customSelectorTools,
     });
 
@@ -172,10 +233,12 @@ You're a helpful assistant that can control a web browser called Blueberry Brows
         highlightCursor: true,
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error ?? "Unknown");
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Unknown error");
       throw new AgentError(
-        `Stagehand agent execution failed: ${message}`,
+        `Stagehand agent execution failed: ${errorMessage}`,
         AgentErrorCode.ACTION_FAILED,
         { originalError: error }
       );
@@ -220,7 +283,11 @@ You're a helpful assistant that can control a web browser called Blueberry Brows
         screenshot: screenshot.toString("base64"),
       });
     } catch (error) {
-      console.warn("Failed to capture final state:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[AgentOrchestrator] Failed to capture final state: ${errorMessage}`
+      );
     }
 
     const finalResponse =
@@ -262,7 +329,7 @@ You're a helpful assistant that can control a web browser called Blueberry Brows
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       throw new AgentError(
-        `Failed to capture state: ${errorMessage}`,
+        `Failed to capture state: ${errorMessage}. Ensure the active tab is accessible.`,
         AgentErrorCode.ACTION_FAILED,
         { originalError: error }
       );

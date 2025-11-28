@@ -127,7 +127,6 @@ export class LLMClient {
 
   async sendChatMessage(request: ChatRequest): Promise<void> {
     try {
-      // Get screenshot from active tab if available
       let screenshot: string | null = null;
       if (this.window) {
         const activeTab = this.window.activeTab;
@@ -141,10 +140,8 @@ export class LLMClient {
         }
       }
 
-      // Build user message content with screenshot first, then text
       const userContent: any[] = [];
 
-      // Add screenshot as the first part if available
       if (screenshot) {
         userContent.push({
           type: "image",
@@ -152,13 +149,11 @@ export class LLMClient {
         });
       }
 
-      // Add text content
       userContent.push({
         type: "text",
         text: request.message,
       });
 
-      // Create user message in CoreMessage format
       const userMessage: CoreMessage = {
         role: "user",
         content: userContent.length === 1 ? request.message : userContent,
@@ -166,7 +161,6 @@ export class LLMClient {
 
       this.messages.push(userMessage);
 
-      // Send updated messages to renderer
       this.sendMessagesToRenderer();
 
       const pageContext = await this.collectPageContext();
@@ -611,20 +605,17 @@ export class LLMClient {
   ): Promise<void> {
     let accumulatedText = "";
 
-    // Create a placeholder assistant message
     const assistantMessage: CoreMessage = {
       role: "assistant",
       content: "",
     };
 
-    // Keep track of the index for updates
     const messageIndex = this.messages.length;
     this.messages.push(assistantMessage);
 
     for await (const chunk of textStream) {
       accumulatedText += chunk;
 
-      // Update assistant message content
       this.messages[messageIndex] = {
         role: "assistant",
         content: accumulatedText,
@@ -637,14 +628,12 @@ export class LLMClient {
       });
     }
 
-    // Final update with complete content
     this.messages[messageIndex] = {
       role: "assistant",
       content: accumulatedText,
     };
     this.sendMessagesToRenderer();
 
-    // Send the final complete signal
     this.sendStreamChunk(messageId, {
       content: accumulatedText,
       isComplete: true,

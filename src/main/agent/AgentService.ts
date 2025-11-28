@@ -61,9 +61,11 @@ export class AgentService extends EventEmitter {
     this.setupOrchestratorListeners(orchestrator);
 
     orchestrator.startTask(goal).catch((error) => {
-      console.error("Agent error:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(`[AgentService] Agent task error: ${errorMessage}`, error);
       const payload = {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       };
       this.emit("agent-error", payload);
       this.emit("agent-event", { type: "error", data: payload });
@@ -77,7 +79,12 @@ export class AgentService extends EventEmitter {
     try {
       await this.orchestrator.cancelTask();
     } catch (error) {
-      console.error("Failed to cancel agent:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(
+        `[AgentService] Failed to cancel agent: ${errorMessage}`,
+        error
+      );
     } finally {
       this.orchestrator = null;
     }
@@ -87,7 +94,12 @@ export class AgentService extends EventEmitter {
     try {
       this.orchestrator?.pauseTask();
     } catch (error) {
-      console.error("Failed to pause agent:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(
+        `[AgentService] Failed to pause agent: ${errorMessage}`,
+        error
+      );
     }
   }
 
@@ -95,20 +107,27 @@ export class AgentService extends EventEmitter {
     try {
       await this.orchestrator?.resumeTask();
     } catch (error) {
-      console.error("Failed to resume agent:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(
+        `[AgentService] Failed to resume agent: ${errorMessage}`,
+        error
+      );
     }
   }
 
   async interruptAgentExecution(): Promise<void> {
     if (!this.stagehand) return;
     try {
-      console.log(
+      console.info(
         "[AgentService] Interrupting Stagehand session due to cancellation..."
       );
       await this.stagehand.close({ force: true });
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       console.warn(
-        "[AgentService] Failed to close Stagehand during cancellation:",
+        `[AgentService] Failed to close Stagehand during cancellation: ${errorMessage}`,
         error
       );
     } finally {
@@ -286,12 +305,13 @@ export class AgentService extends EventEmitter {
     if (!this.stagehand) return;
 
     try {
-      console.log("[AgentService] Closing Stagehand session...");
+      console.info("[AgentService] Closing Stagehand session...");
       await this.stagehand.close(opts);
-      console.log("[AgentService] Stagehand session closed.");
+      console.info("[AgentService] Stagehand session closed.");
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       console.warn(
-        "[AgentService] Error while closing Stagehand session:",
+        `[AgentService] Error while closing Stagehand session: ${errorMessage}`,
         err
       );
     } finally {
@@ -301,9 +321,8 @@ export class AgentService extends EventEmitter {
 
   private async createStagehand(): Promise<Stagehand> {
     const cdpUrl = await this.resolveCdpUrl();
-    console.log(
-      "[AgentService] Initializing Stagehand connected to Electron...",
-      cdpUrl
+    console.info(
+      `[AgentService] Initializing Stagehand connected to Electron at ${cdpUrl}...`
     );
 
     const stagehand = new Stagehand({
@@ -317,7 +336,7 @@ export class AgentService extends EventEmitter {
     });
 
     await stagehand.init();
-    console.log("[AgentService] Stagehand initialized.");
+    console.info("[AgentService] Stagehand initialized successfully.");
 
     return stagehand;
   }
@@ -338,9 +357,9 @@ export class AgentService extends EventEmitter {
       }
       return base;
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       console.warn(
-        `[AgentService] Failed to resolve CDP ws endpoint from ${versionUrl}. Falling back to ${base}:`,
-        err
+        `[AgentService] Failed to resolve CDP ws endpoint from ${versionUrl}, falling back to ${base}: ${errorMessage}`
       );
       return base;
     }
