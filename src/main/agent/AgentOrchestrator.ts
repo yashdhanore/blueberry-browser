@@ -72,9 +72,12 @@ export class AgentOrchestrator extends EventEmitter {
           "[AgentOrchestrator] Agent task was cancelled by the user."
         );
       } else {
-        console.error("Agent error:", error);
         const errorMessage =
           error instanceof Error ? error.message : String(error);
+        console.error(
+          `[AgentOrchestrator] Agent task failed: ${errorMessage}`,
+          error
+        );
         this.context.failTask(errorMessage);
         this.emit("error", {
           error: errorMessage,
@@ -140,14 +143,18 @@ export class AgentOrchestrator extends EventEmitter {
     try {
       page = await this.stagehandService.getPageForActiveTab(this.window);
     } catch (error) {
-      console.warn("Failed to resolve Stagehand page, falling back:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[AgentOrchestrator] Failed to resolve Stagehand page, attempting fallback: ${errorMessage}`
+      );
       const ctx = (stagehand as any).context;
       page = ctx?.activePage?.();
     }
 
     if (!page) {
       throw new AgentError(
-        "No suitable Stagehand page found for agent execution",
+        "No suitable Stagehand page found for agent execution. Ensure a tab is open and loaded.",
         AgentErrorCode.INVALID_STATE
       );
     }
@@ -159,7 +166,14 @@ export class AgentOrchestrator extends EventEmitter {
 
     const customSelectorTools = createLocatorTools(
       () => page,
-      () => this.actExecutor!
+      () => {
+        if (!this.actExecutor) {
+          throw new Error(
+            "StagehandActExecutor is not available. This should not happen during agent execution."
+          );
+        }
+        return this.actExecutor;
+      }
     );
 
     const agent = stagehand.agent({
@@ -219,10 +233,12 @@ export class AgentOrchestrator extends EventEmitter {
         highlightCursor: true,
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error ?? "Unknown");
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Unknown error");
       throw new AgentError(
-        `Stagehand agent execution failed: ${message}`,
+        `Stagehand agent execution failed: ${errorMessage}`,
         AgentErrorCode.ACTION_FAILED,
         { originalError: error }
       );
@@ -267,7 +283,11 @@ export class AgentOrchestrator extends EventEmitter {
         screenshot: screenshot.toString("base64"),
       });
     } catch (error) {
-      console.warn("Failed to capture final state:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[AgentOrchestrator] Failed to capture final state: ${errorMessage}`
+      );
     }
 
     const finalResponse =
@@ -309,7 +329,7 @@ export class AgentOrchestrator extends EventEmitter {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       throw new AgentError(
-        `Failed to capture state: ${errorMessage}`,
+        `Failed to capture state: ${errorMessage}. Ensure the active tab is accessible.`,
         AgentErrorCode.ACTION_FAILED,
         { originalError: error }
       );

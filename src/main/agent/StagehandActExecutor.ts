@@ -5,7 +5,6 @@ import type {
   ObserveOptions,
 } from "@browserbasehq/stagehand";
 import type { Page } from "@browserbasehq/stagehand";
-import type { Stagehand } from "@browserbasehq/stagehand";
 import type { Window } from "../Window";
 import { AgentService } from "./AgentService";
 
@@ -66,7 +65,12 @@ export class StagehandActExecutor {
 
       return Array.isArray(result) ? result : [];
     } catch (error) {
-      console.error("[StagehandActExecutor] Observe failed:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(
+        `[StagehandActExecutor] Observe failed for instruction "${instruction}":`,
+        errorMessage
+      );
       throw error;
     }
   }
@@ -102,15 +106,20 @@ export class StagehandActExecutor {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      console.error("[StagehandActExecutor] Act failed:", errorMessage);
+      const actionDescription =
+        typeof instructionOrAction === "string"
+          ? instructionOrAction
+          : instructionOrAction.description;
+
+      console.error(
+        `[StagehandActExecutor] Act failed for "${actionDescription}":`,
+        errorMessage
+      );
 
       return {
         success: false,
         message: errorMessage,
-        actionDescription:
-          typeof instructionOrAction === "string"
-            ? instructionOrAction
-            : instructionOrAction.description,
+        actionDescription,
         actions: [],
         error: errorMessage,
       };
@@ -131,7 +140,7 @@ export class StagehandActExecutor {
       if (observedActions.length > 0) {
         const first = observedActions[0];
 
-        console.log(
+        console.info(
           `[StagehandActExecutor] Executing observed action: ${first.description}`
         );
 
@@ -146,9 +155,11 @@ export class StagehandActExecutor {
               actions: [first],
             };
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
+            const errorMessage =
+              err instanceof Error ? err.message : String(err);
             console.warn(
-              `[StagehandActExecutor] DOM click failed for selector ${first.selector}, falling back to stagehand.act: ${msg}`
+              `[StagehandActExecutor] DOM click failed for selector "${first.selector}", falling back to stagehand.act:`,
+              errorMessage
             );
             return await this.act(first, options);
           }
@@ -157,14 +168,16 @@ export class StagehandActExecutor {
         return await this.act(first, options);
       } else {
         console.warn(
-          `[StagehandActExecutor] No actions observed, executing instruction directly: ${instruction}`
+          `[StagehandActExecutor] No actions observed for "${instruction}", executing instruction directly`
         );
         return await this.act(instruction, options);
       }
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       console.warn(
-        `[StagehandActExecutor] Observe failed, falling back to direct act: ${instruction}`,
-        error
+        `[StagehandActExecutor] Observe failed for "${instruction}", falling back to direct act:`,
+        errorMessage
       );
       return await this.act(instruction, options);
     }
@@ -173,8 +186,8 @@ export class StagehandActExecutor {
   private async domClick(selector: string): Promise<void> {
     const page = await this.getPage();
 
-    await page.evaluate((sel) => {
-      let el: Element | null = null;
+    await page.evaluate((sel: string) => {
+      let element: Element | null = null;
 
       if (sel.startsWith("xpath=")) {
         const xpath = sel.slice("xpath=".length);
@@ -185,16 +198,16 @@ export class StagehandActExecutor {
           XPathResult.FIRST_ORDERED_NODE_TYPE,
           null
         );
-        el = result.singleNodeValue as Element | null;
+        element = result.singleNodeValue as Element | null;
       } else {
-        el = document.querySelector(sel);
+        element = document.querySelector(sel);
       }
 
-      if (!el) {
+      if (!element) {
         throw new Error(`No element found for selector: ${sel}`);
       }
 
-      (el as HTMLElement).click();
+      (element as HTMLElement).click();
     }, selector);
   }
 

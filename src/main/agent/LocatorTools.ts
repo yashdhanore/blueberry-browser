@@ -38,7 +38,14 @@ const actInstructionSchema = z.object({
   timeout: z.number().optional(),
 });
 
-const resolveLocator = async (page: Page, selector: string) => {
+/**
+ * Resolves a Playwright locator for the given selector
+ * @throws Error if no element is found
+ */
+const resolveLocator = async (
+  page: Page,
+  selector: string
+): Promise<ReturnType<Page["locator"]>> => {
   const locator = page.locator(selector);
   const matchCount = await locator.count();
 
@@ -66,8 +73,8 @@ export const createLocatorTools = (
         const parsed = clickSchema.parse(args);
         const page = await resolvePage(pageSupplier);
 
-        await page.evaluate((sel) => {
-          let el: Element | null = null;
+        await page.evaluate((sel: string) => {
+          let element: Element | null = null;
 
           if (sel.startsWith("xpath=")) {
             const xpath = sel.slice("xpath=".length);
@@ -78,16 +85,16 @@ export const createLocatorTools = (
               XPathResult.FIRST_ORDERED_NODE_TYPE,
               null
             );
-            el = result.singleNodeValue as Element | null;
+            element = result.singleNodeValue as Element | null;
           } else {
-            el = document.querySelector(sel);
+            element = document.querySelector(sel);
           }
 
-          if (!el) {
+          if (!element) {
             throw new Error(`No element found for selector: ${sel}`);
           }
 
-          (el as HTMLElement).click();
+          (element as HTMLElement).click();
         }, parsed.selector);
 
         return {
@@ -185,8 +192,10 @@ export const createLocatorTools = (
           });
 
           if (!result.success) {
+            const errorMessage =
+              result.error || result.message || "Action execution failed";
             throw new Error(
-              result.error || result.message || "Action execution failed"
+              `Act instruction "${parsed.instruction}" failed: ${errorMessage}`
             );
           }
 
@@ -204,7 +213,9 @@ export const createLocatorTools = (
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
-          throw new Error(`Act instruction failed: ${errorMessage}`);
+          throw new Error(
+            `Act instruction "${parsed.instruction}" failed: ${errorMessage}`
+          );
         }
       },
     },
