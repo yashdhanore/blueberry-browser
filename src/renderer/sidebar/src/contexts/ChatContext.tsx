@@ -8,17 +8,13 @@ interface Message {
     isStreaming?: boolean
 }
 
-type ChatMode = 'chat' | 'agent'
-
 interface ChatContextType {
     messages: Message[]
     isLoading: boolean
-    mode: ChatMode
 
     // Chat actions
-    sendMessage: (content: string, mode?: ChatMode) => Promise<void>
+    sendMessage: (content: string) => Promise<void>
     clearChat: () => void
-    setMode: (mode: ChatMode) => void
 
     // Page content access
     getPageContent: () => Promise<string | null>
@@ -40,7 +36,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [messages, setMessages] = useState<Message[]>([])
     const [agentMessages, setAgentMessages] = useState<Message[]>([])
     const [isLoading, setIsLoading] = useState(false)
-    const [mode, setMode] = useState<ChatMode>('chat')
+    const [pendingMessageIds, setPendingMessageIds] = useState<Set<string>>(new Set())
 
     // Load initial messages from main process
     useEffect(() => {
@@ -81,33 +77,53 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loadMessages()
     }, [])
 
-    const sendMessage = useCallback(async (content: string, messageMode?: ChatMode) => {
-        const currentMode = messageMode || mode
+    const sendMessage = useCallback(async (content: string) => {
         setIsLoading(true)
 
+        // Create optimistic user message - show immediately
+        const messageId = Date.now().toString()
+        const optimisticMessage: Message = {
+            id: messageId,
+            role: 'user',
+            content: content,
+            timestamp: Date.now(),
+            isStreaming: false
+        }
+
+        // Add to both arrays optimistically (we'll deduplicate when backend confirms)
+        setMessages(prev => [...prev, optimisticMessage])
+        setAgentMessages(prev => [...prev, optimisticMessage])
+        setPendingMessageIds(prev => new Set(prev).add(messageId))
+
         try {
-            if (currentMode === 'agent') {
-                // Send to agent
-                const result = await window.sidebarAPI.runAgentTask(content)
-                // Agent messages are updated via the sidebar-agent-messages event
-                if (!result.success && result.error) {
-                    console.error('Agent task failed:', result.error)
-                }
-            } else {
-                // Send to LLM chat
-                const messageId = Date.now().toString()
-                await window.sidebarAPI.sendChatMessage({
-                    message: content,
-                    messageId: messageId
-                })
-                // Messages will be updated via the chat-messages-updated event
+            const result = await window.sidebarAPI.processUserMessage({
+                message: content,
+                messageId: messageId
+            })
+
+            // Remove from pending once backend processes it
+            setPendingMessageIds(prev => {
+                const next = new Set(prev)
+                next.delete(messageId)
+                return next
+            })
+
+            // For agent mode, the result contains success/error info
+            if (result.mode === 'agent' && !result.success && result.error) {
+                console.error('Agent task failed:', result.error)
             }
         } catch (error) {
             console.error('Failed to send message:', error)
-        } finally {
+            // Remove from pending on error
+            setPendingMessageIds(prev => {
+                const next = new Set(prev)
+                next.delete(messageId)
+                return next
+            })
             setIsLoading(false)
         }
-    }, [mode])
+        // Note: isLoading will be set to false by event listeners when messages arrive
+    }, [])
 
     const clearChat = useCallback(async () => {
         try {
@@ -160,28 +176,95 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Listen for message updates from main process (LLM chat)
         const handleMessagesUpdated = (updatedMessages: any[]) => {
             // Convert CoreMessage format to our frontend Message format
-            const convertedMessages = updatedMessages.map((msg: any, index: number) => ({
-                id: `msg-${index}`,
-                role: msg.role,
-                content: typeof msg.content === 'string' 
-                    ? msg.content 
-                    : msg.content.find((p: any) => p.type === 'text')?.text || '',
-                timestamp: Date.now(),
-                isStreaming: false
-            }))
-            setMessages(convertedMessages)
+            setMessages(prev => {
+                const convertedMessages = updatedMessages.map((msg: any, index: number) => {
+                    // Extract text content
+                    const textContent = typeof msg.content === 'string' 
+                        ? msg.content 
+                        : msg.content.find((p: any) => p.type === 'text')?.text || ''
+
+                    // If this is a user message matching a pending one, keep the pending ID
+                    let messageId = `msg-${index}`
+                    if (msg.role === 'user' && textContent) {
+                        const pendingMatch = Array.from(pendingMessageIds).find(id => {
+                            const pendingMsg = prev.find(m => m.id === id)
+                            return pendingMsg?.content === textContent
+                        })
+                        if (pendingMatch) {
+                            messageId = pendingMatch
+                            setPendingMessageIds(prevPending => {
+                                const next = new Set(prevPending)
+                                next.delete(pendingMatch)
+                                return next
+                            })
+                            
+                            // Remove optimistic message from agentMessages since this is chat mode
+                            setAgentMessages(prevAgent => 
+                                prevAgent.filter(m => m.id !== pendingMatch)
+                            )
+                        }
+                    }
+
+                    return {
+                        id: messageId,
+                        role: msg.role,
+                        content: textContent,
+                        timestamp: Date.now(),
+                        isStreaming: false
+                    }
+                })
+
+                // Replace with backend messages, but keep any pending messages not yet confirmed
+                const backendIds = new Set(convertedMessages.map(m => m.id))
+                const pendingToKeep = prev.filter(m => 
+                    pendingMessageIds.has(m.id) && !backendIds.has(m.id)
+                )
+                return [...convertedMessages, ...pendingToKeep]
+            })
         }
 
         // Listen for agent message updates
         const handleAgentMessagesUpdated = (updatedAgentMessages: any[]) => {
-            const convertedAgentMessages = updatedAgentMessages.map((msg: any) => ({
-                id: msg.id,
-                role: msg.role,
-                content: msg.content,
-                timestamp: msg.timestamp,
-                isStreaming: false
-            }))
-            setAgentMessages(convertedAgentMessages)
+            setAgentMessages(prev => {
+                const convertedAgentMessages = updatedAgentMessages.map((msg: any) => {
+                    // If this is a user message matching a pending one, keep the pending ID
+                    let messageId = msg.id
+                    if (msg.role === 'user') {
+                        const pendingMatch = Array.from(pendingMessageIds).find(id => {
+                            const pendingMsg = prev.find(m => m.id === id)
+                            return pendingMsg?.content === msg.content
+                        })
+                        if (pendingMatch) {
+                            messageId = pendingMatch
+                            setPendingMessageIds(prevPending => {
+                                const next = new Set(prevPending)
+                                next.delete(pendingMatch)
+                                return next
+                            })
+                            
+                            // Remove optimistic message from messages since this is agent mode
+                            setMessages(prevChat => 
+                                prevChat.filter(m => m.id !== pendingMatch)
+                            )
+                        }
+                    }
+
+                    return {
+                        id: messageId,
+                        role: msg.role,
+                        content: msg.content,
+                        timestamp: msg.timestamp,
+                        isStreaming: false
+                    }
+                })
+
+                // Replace with backend messages, but keep any pending messages not yet confirmed
+                const backendIds = new Set(convertedAgentMessages.map(m => m.id))
+                const pendingToKeep = prev.filter(m => 
+                    pendingMessageIds.has(m.id) && !backendIds.has(m.id)
+                )
+                return [...convertedAgentMessages, ...pendingToKeep]
+            })
             setIsLoading(false)
         }
 
@@ -194,21 +277,45 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             window.sidebarAPI.removeMessagesUpdatedListener()
             window.sidebarAPI.removeAgentMessagesListener()
         }
-    }, [])
+    }, [pendingMessageIds])
 
     // Merge messages for display (combine LLM and agent messages, sorted by timestamp)
+    // Deduplicate by content and timestamp to avoid showing the same message twice
     const mergedMessages = React.useMemo(() => {
         const allMessages = [...messages, ...agentMessages]
-        return allMessages.sort((a, b) => a.timestamp - b.timestamp)
+        const seen = new Map<string, Message>()
+        
+        // Deduplicate: if same content and role within 5 seconds, keep only one
+        for (const msg of allMessages) {
+            const key = `${msg.role}:${msg.content}`
+            const existing = seen.get(key)
+            
+            if (!existing) {
+                seen.set(key, msg)
+            } else {
+                // If timestamps are very close (within 5 seconds), it's likely a duplicate
+                const timeDiff = Math.abs(msg.timestamp - existing.timestamp)
+                if (timeDiff < 5000) {
+                    // Keep the one with the earlier timestamp (likely the optimistic one)
+                    if (msg.timestamp < existing.timestamp) {
+                        seen.set(key, msg)
+                    }
+                } else {
+                    // Different times, keep both
+                    seen.set(key, msg)
+                }
+            }
+        }
+        
+        const uniqueMessages = Array.from(seen.values())
+        return uniqueMessages.sort((a, b) => a.timestamp - b.timestamp)
     }, [messages, agentMessages])
 
     const value: ChatContextType = {
         messages: mergedMessages,
         isLoading,
-        mode,
         sendMessage,
         clearChat,
-        setMode,
         getPageContent,
         getPageText,
         getCurrentUrl

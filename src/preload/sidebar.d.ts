@@ -30,7 +30,30 @@ interface AgentMessage {
   timestamp: number;
 }
 
+interface RoutingDecision {
+  messageId: string;
+  mode: "chat" | "agent";
+  reason: string;
+  error?: string;
+}
+
+interface ProcessMessageResult {
+  mode: "chat" | "agent";
+  success: boolean;
+  message?: string;
+  error?: string;
+  reason: string;
+}
+
 interface SidebarAPI {
+  // Unified message handler
+  processUserMessage: (request: {
+    message: string;
+    messageId: string;
+  }) => Promise<ProcessMessageResult>;
+  onRoutingDecision: (callback: (data: RoutingDecision) => void) => void;
+  removeRoutingDecisionListener: () => void;
+
   // Chat functionality
   sendChatMessage: (request: ChatRequest) => Promise<void>;
   onChatResponse: (callback: (data: ChatResponse) => void) => void;

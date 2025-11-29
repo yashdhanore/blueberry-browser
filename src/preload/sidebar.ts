@@ -17,8 +17,40 @@ interface ChatResponse {
   isComplete: boolean;
 }
 
+interface RoutingDecision {
+  messageId: string;
+  mode: "chat" | "agent";
+  reason: string;
+  error?: string;
+}
+
+interface ProcessMessageResult {
+  mode: "chat" | "agent";
+  success: boolean;
+  message?: string;
+  error?: string;
+  reason: string;
+}
+
 // Sidebar specific APIs
 const sidebarAPI = {
+  // Unified message handler - automatically routes to chat or agent
+  processUserMessage: (request: { message: string; messageId: string }) =>
+    electronAPI.ipcRenderer.invoke(
+      "sidebar-handle-user-message",
+      request
+    ) as Promise<ProcessMessageResult>,
+
+  onRoutingDecision: (callback: (data: RoutingDecision) => void) => {
+    electronAPI.ipcRenderer.on("sidebar-routing-decision", (_, data) =>
+      callback(data)
+    );
+  },
+
+  removeRoutingDecisionListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("sidebar-routing-decision");
+  },
+
   // Chat functionality
   sendChatMessage: (request: Partial<ChatRequest>) =>
     electronAPI.ipcRenderer.invoke("sidebar-chat-message", request),

@@ -1,5 +1,10 @@
 import { WebContents } from "electron";
-import { streamText, type LanguageModel, type CoreMessage } from "ai";
+import {
+  streamText,
+  generateText,
+  type LanguageModel,
+  type CoreMessage,
+} from "ai";
 import { openai } from "@ai-sdk/openai";
 import { anthropic } from "@ai-sdk/anthropic";
 import * as dotenv from "dotenv";
@@ -17,6 +22,12 @@ interface ChatRequest {
 interface StreamChunk {
   content: string;
   isComplete: boolean;
+}
+
+export interface InteractionModeDecision {
+  mode: "chat" | "agent";
+  reason: string;
+  agentInstruction?: string;
 }
 
 type LLMProvider = "openai" | "anthropic";
@@ -119,7 +130,7 @@ export class LLMClient {
 
       // Build user message content with screenshot first, then text
       const userContent: any[] = [];
-      
+
       // Add screenshot as the first part if available
       if (screenshot) {
         userContent.push({
@@ -127,7 +138,7 @@ export class LLMClient {
           image: screenshot,
         });
       }
-      
+
       // Add text content
       userContent.push({
         type: "text",
@@ -139,7 +150,7 @@ export class LLMClient {
         role: "user",
         content: userContent.length === 1 ? request.message : userContent,
       };
-      
+
       this.messages.push(userMessage);
 
       // Send updated messages to renderer
@@ -170,15 +181,115 @@ export class LLMClient {
     return this.messages;
   }
 
+  /**
+   * Lightweight intent detection - determines if message should be chat or agent.
+   * Uses a simple prompt without page context to minimize latency.
+   */
+  async determineInteractionMode(
+    message: string
+  ): Promise<InteractionModeDecision> {
+    if (!this.model) {
+      // Default to chat if LLM is not configured
+      return {
+        mode: "chat",
+        reason: "LLM not configured",
+      };
+    }
+
+    try {
+      // Simple prompt without page context for speed
+      const prompt = `Classify this user message as either "chat" (conversational) or "agent" (requires browser actions).
+
+User message: "${message}"
+
+Respond with JSON only: {"mode": "chat" or "agent", "reason": "brief reason"}`;
+
+      const result = await generateText({
+        model: this.model,
+        prompt: prompt,
+        temperature: 0.2,
+        maxRetries: 1,
+      });
+
+      const responseText = result.text.trim();
+
+      // Try to parse JSON response
+      try {
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            mode: parsed.mode === "agent" ? "agent" : "chat",
+            reason: parsed.reason || "Classified by LLM",
+            agentInstruction: parsed.mode === "agent" ? message : undefined,
+          };
+        }
+      } catch (parseError) {
+        // Fall through to keyword fallback
+      }
+
+      // Fallback: keyword-based classification
+      const lowerMessage = message.toLowerCase();
+      const agentKeywords = [
+        "click",
+        "fill",
+        "submit",
+        "search",
+        "navigate",
+        "open",
+        "close",
+        "select",
+        "enter",
+        "type",
+        "press",
+        "scroll",
+        "find",
+        "extract",
+        "do this",
+        "perform",
+        "execute",
+        "run",
+        "automate",
+        "complete",
+        "fill out",
+        "fill in",
+        "go to",
+        "visit",
+        "buy",
+        "purchase",
+        "add to cart",
+      ];
+
+      const hasAgentKeyword = agentKeywords.some((keyword) =>
+        lowerMessage.includes(keyword)
+      );
+
+      return {
+        mode: hasAgentKeyword ? "agent" : "chat",
+        reason: "Keyword-based classification",
+        agentInstruction: hasAgentKeyword ? message : undefined,
+      };
+    } catch (error) {
+      console.error("Error determining interaction mode:", error);
+      // Default to chat on error
+      return {
+        mode: "chat",
+        reason: "Error during classification",
+      };
+    }
+  }
+
   private sendMessagesToRenderer(): void {
     this.webContents.send("chat-messages-updated", this.messages);
   }
 
-  private async prepareMessagesWithContext(_request: ChatRequest): Promise<CoreMessage[]> {
+  private async prepareMessagesWithContext(
+    _request: ChatRequest
+  ): Promise<CoreMessage[]> {
     // Get page context from active tab
     let pageUrl: string | null = null;
     let pageText: string | null = null;
-    
+
     if (this.window) {
       const activeTab = this.window.activeTab;
       if (activeTab) {
@@ -201,7 +312,10 @@ export class LLMClient {
     return [systemMessage, ...this.messages];
   }
 
-  private buildSystemPrompt(url: string | null, pageText: string | null): string {
+  private buildSystemPrompt(
+    url: string | null,
+    pageText: string | null
+  ): string {
     const parts: string[] = [
       "You are a helpful AI assistant integrated into a web browser.",
       "You can analyze and discuss web pages with the user.",
@@ -264,7 +378,7 @@ export class LLMClient {
       role: "assistant",
       content: "",
     };
-    
+
     // Keep track of the index for updates
     const messageIndex = this.messages.length;
     this.messages.push(assistantMessage);

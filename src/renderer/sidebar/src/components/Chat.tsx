@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { ArrowUp, Square, Sparkles, Plus, Bot, MessageSquare } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Plus } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
@@ -152,11 +152,9 @@ const LoadingIndicator: React.FC = () => {
 
 // Chat Input Component with pill design
 const ChatInput: React.FC<{
-    onSend: (message: string, mode?: 'chat' | 'agent') => void
+    onSend: (message: string) => void
     disabled: boolean
-    mode: 'chat' | 'agent'
-    onModeChange: (mode: 'chat' | 'agent') => void
-}> = ({ onSend, disabled, mode, onModeChange }) => {
+}> = ({ onSend, disabled }) => {
     const [value, setValue] = useState('')
     const [isFocused, setIsFocused] = useState(false)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -173,7 +171,7 @@ const ChatInput: React.FC<{
 
     const handleSubmit = () => {
         if (value.trim() && !disabled) {
-            onSend(value.trim(), mode)
+            onSend(value.trim())
             setValue('')
             // Reset textarea height
             if (textareaRef.current) {
@@ -195,36 +193,6 @@ const ChatInput: React.FC<{
             "shadow-chat animate-spring-scale outline-none transition-all duration-200",
             isFocused ? "border-primary/20 dark:border-primary/30" : "border-border"
         )}>
-            {/* Mode Toggle */}
-            <div className="w-full flex items-center gap-2 px-1 mb-2">
-                <button
-                    onClick={() => onModeChange('chat')}
-                    className={cn(
-                        "flex-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                        "flex items-center justify-center gap-2",
-                        mode === 'chat'
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    )}
-                >
-                    <MessageSquare className="size-4" />
-                    Chat
-                </button>
-                <button
-                    onClick={() => onModeChange('agent')}
-                    className={cn(
-                        "flex-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                        "flex items-center justify-center gap-2",
-                        mode === 'agent'
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    )}
-                >
-                    <Bot className="size-4" />
-                    Agent
-                </button>
-            </div>
-
             {/* Input Area */}
             <div className="w-full px-3 py-2">
                 <div className="w-full flex items-start gap-3">
@@ -236,7 +204,7 @@ const ChatInput: React.FC<{
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
                             onKeyDown={handleKeyDown}
-                            placeholder={mode === 'agent' ? "Enter agent task..." : "Send a message..."}
+                            placeholder="Send a message or ask me to do something..."
                             className="w-full resize-none outline-none bg-transparent 
                                      text-foreground placeholder:text-muted-foreground
                                      min-h-[24px] max-h-[200px]"
@@ -295,7 +263,7 @@ const ConversationTurnComponent: React.FC<{
 
 // Main Chat Component
 export const Chat: React.FC = () => {
-    const { messages, isLoading, sendMessage, clearChat, mode, setMode } = useChat()
+    const { messages, isLoading, sendMessage, clearChat } = useChat()
     const scrollRef = useAutoScroll(messages)
 
     // Group messages into conversation turns
@@ -373,7 +341,7 @@ export const Chat: React.FC = () => {
 
             {/* Input Area */}
             <div className="p-4">
-                <ChatInput onSend={sendMessage} disabled={isLoading} mode={mode} onModeChange={setMode} />
+                <ChatInput onSend={sendMessage} disabled={isLoading} />
             </div>
         </div>
     )

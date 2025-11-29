@@ -160,7 +160,69 @@ export class EventManager {
       return true;
     });
 
-    // Chat message
+    // Unified message handler - determines chat vs agent automatically
+    ipcMain.handle(
+      "sidebar-handle-user-message",
+      async (_, request: { message: string; messageId: string }) => {
+        try {
+          // Determine interaction mode using lightweight LLM call
+          const decision =
+            await this.mainWindow.sidebar.client.determineInteractionMode(
+              request.message
+            );
+
+          // Route to appropriate handler
+          if (decision.mode === "agent") {
+            const agentManager = this.mainWindow.sidebar.agentManagerInstance;
+            if (!agentManager) {
+              return {
+                mode: "agent",
+                success: false,
+                error: "Agent manager not initialized",
+                reason: decision.reason,
+              };
+            }
+
+            // Use refined instruction if available, otherwise use original message
+            const instruction = decision.agentInstruction || request.message;
+            const result = await agentManager.runTask(instruction);
+
+            return {
+              mode: "agent",
+              success: result.success,
+              message: result.message,
+              error: result.error,
+              reason: decision.reason,
+            };
+          } else {
+            // Chat mode
+            await this.mainWindow.sidebar.client.sendChatMessage({
+              message: request.message,
+              messageId: request.messageId,
+            });
+
+            return {
+              mode: "chat",
+              success: true,
+              reason: decision.reason,
+            };
+          }
+        } catch (error) {
+          console.error("Error handling user message:", error);
+          const errorMessage =
+            error instanceof Error ? error.message : "Unknown error";
+
+          return {
+            mode: "chat",
+            success: false,
+            error: errorMessage,
+            reason: "Error during routing, defaulted to chat",
+          };
+        }
+      }
+    );
+
+    // Chat message (kept for backward compatibility)
     ipcMain.handle("sidebar-chat-message", async (_, request) => {
       // The LLMClient now handles getting the screenshot and context directly
       await this.mainWindow.sidebar.client.sendChatMessage(request);
