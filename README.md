@@ -34,33 +34,14 @@ The implementation is designed to be:
 
 ### Architecture overview
 
+- **`StagehandAgentManager` (main process, `src/main/agent/StagehandAgentManager.ts`)**
+  - Wraps the @browserbasehq/stagehand SDK directly and is responsible for CDP discovery, matching the active Electron tab to a Stagehand page, launching the CU agent, and streaming results.
+  - Emits lifecycle events (`start`, `screenshot`, `complete`, `error`, `cancelled`, `history`) and exposes helpers such as `runTask`, `cancelCurrentTask`, `getState`, and `cleanup`.
+
 - **`AgentService` (main process, `src/main/agent/AgentService.ts`)**
-  - A single file that owns the **Stagehand** client and manages the Gemini Computer Use session.
-  - Exposes a small API (`startAgent`, `cancelAgent`, `pauseAgent`, `resumeAgent`, `getAgentState`).
-  - Resolves the correct **CDP endpoint** for the running Electron instance (`resolveCdpUrl`) and initializes Stagehand with `env: "LOCAL"` and `disableAPI: true`.
-  - Forwards agent lifecycle events (`start`, `turn`, `reasoning`, `screenshot`, `complete`, `error`, etc.) to the sidebar via `window.sidebar.view.webContents.send("agent-update", ...)`.
-
-- **`AgentOrchestrator` (main process, `src/main/agent/AgentOrchestrator.ts`)**
-  - Orchestrates a **single agent run**: tracks goal, turns, state and errors via a `ContextManager`.
-  - Binds Stagehand to the **active page** (filters out `chrome://`, devtools, and internal topbar/sidebar pages).
-  - Configures the Gemini CU model with a **system prompt** that:
-    - Keeps the agent focused on the user's goal.
-    - Prefers `act_instruction` tool (observe→act pattern) for natural language interactions.
-    - Falls back to selector-based tools (`click_selector`, `fill_selector`, etc.) when precise control is needed.
-  - Records all actions and a final summary into the context, captures **before/after screenshots**, and emits high‑level events the UI can consume.
-
-- **`StagehandActExecutor` (main process, `src/main/agent/StagehandActExecutor.ts`)**
-  - Wraps Stagehand's `observe()` and `act()` APIs for deterministic, self-healing browser automation.
-  - Implements the **observe→act pattern**: first observes candidate actions for an instruction, then executes the chosen action deterministically (without additional LLM calls).
-  - Provides `actAfterObserve()` convenience method that combines both steps with automatic fallback to direct execution if observation fails.
-  - Normalizes return values into `ActResultSummary` for consistent logging and error handling.
-
-- **`ComputerUseActions` (main process, `src/main/agent/ComputerUseActions.ts`)**
-  - Thin abstraction over the Stagehand **page** for low-level browser control and observation.
-  - Provides tools used by the agent such as:
-    - Navigation (`navigate`, `goBack`, `goForward`).
-    - Interaction via normalized coordinates (`clickAt`, `hoverAt`, `scrollDocument`, `scrollAt`, `typeTextAt`, `keyCombo`).
-    - Page understanding helpers (`getPageSnapshot`, `getCurrentUrl`, `getPageTitle`).
+  - Owns the singleton `StagehandAgentManager`, ensures the main window is wired in, and forwards lifecycle events to the sidebar via `agent-update` IPC messages.
+  - Presents a stable API to the rest of the app (`startAgent`, `cancelAgent`, `pauseAgent`, `resumeAgent`, `getAgentState`) even though pause/resume are currently best-effort no-ops.
+  - Locks/unlocks user interaction while a CU run is executing so the user can see when the browser is under agent control.
 
 - **Preload bridge (`src/preload/sidebar.ts`)**
   - Exposes a typed `sidebarAPI` to the renderer via `contextBridge`.
@@ -73,10 +54,9 @@ The implementation is designed to be:
   - `ChatContext` owns the **conversation state** and subscribes to `sidebarAPI` events. It merges:
     - Normal chat messages; and
     - Agent activity items into a single `conversationItems`.
-  - `AgentActivityCard` renders an agent run card shows:
+  - `AgentActivityCard` renders an agent run card showing:
     - Compact / detailed views.
-    - Progress, current reasoning, structured action list, errors and final outcome.
-    - Latest screenshot of what the agent was seeing.
+    - Progress, current reasoning (when available), latest screenshot, and the final outcome.
     - Controls for **Pause**, **Resume**, **Cancel**, and **Dismiss**.
   - `Chat` composes the chat transcript, smart suggestions, and the agent activity card into one UX.
 
@@ -87,7 +67,7 @@ The implementation is designed to be:
   - Typical use cases: “research this topic and summarize it”, “log into X and find Y”, “scroll and extract all entries from this table”, etc.
 
 - **Safe page targeting**
-  - `AgentService.getPageForActiveTab` carefully selects the relevant page from Stagehand’s context, explicitly excluding **Chrome/DevTools** and Blueberry’s own UI (topbar/sidebar dev URLs).
+  - `StagehandAgentManager` inspects Stagehand’s context to find a page matching the active Electron tab, explicitly excluding **Chrome/DevTools** and Blueberry’s own UI (topbar/sidebar dev URLs).
   - The system prompt reinforces this by telling Gemini to **avoid clicking or typing in Blueberry’s chrome** and to avoid destructive actions unless explicitly requested.
 
 - **Rich, live status in the sidebar**
@@ -144,8 +124,8 @@ LLM_MODEL=gpt-4o-mini
 
 ### Design decisions & tradeoffs
 
-- **Explicit orchestration layer**
-  - Introducing `AgentOrchestrator` avoids pushing complex lifecycle logic into either Stagehand wrappers or UI code. This makes it much easier to reason about **one agent run at a time** and to evolve the protocol later.
+- **Lean on Stagehand’s built-in agent**
+  - Earlier iterations tried to re-implement Stagehand’s act/observe flow with custom locator tools, executors, and tool schemas. The current approach simply calls `stagehand.agent({ cua: true }).execute(...)`, which is easier to reason about and automatically benefits from Stagehand’s self-healing behaviors.
 
 - **Iterated from a custom Gemini CU loop**
   - The first version (see the `computer-use-initialize` branch) implemented Computer Use manually: capture screenshot → send to Gemini → parse the response into actions → execute actions via denormalised screen coordinates.
@@ -160,22 +140,9 @@ LLM_MODEL=gpt-4o-mini
   - All agent updates are modelled as **events** (`agent-update` IPC) instead of request/response calls.
   - This lines up naturally with long‑running CU sessions and keeps the React tree in sync via a single `ChatContext`.
 
-- **Observe→Act pattern for self-healing**
-  - The agent uses Stagehand's **observe→act pattern** via the `act_instruction` tool for natural language browser interactions.
-  - When the agent calls `act_instruction` with an instruction like "click the login button":
-    1. **Observe phase**: Stagehand analyzes the page and returns candidate actions (with selector, description, method).
-    2. **Act phase**: The chosen action is executed deterministically without additional LLM calls.
-  - This pattern provides **self-healing behavior**: actions automatically adapt when websites change, and cached actions can be reused across runs to reduce costs.
-  - The `StagehandActExecutor` helper manages this flow, falling back to direct execution if observation fails.
-
-- **Selector‑based tools for precise control**
-  - For cases where the agent has a stable CSS/XPath selector, it can use **selector‑based tools** (`click_selector`, `fill_selector`, `type_selector`, `press_keys`) defined in `src/main/agent/LocatorTools.ts`.
-  - These tools wrap Stagehand's locator API with Zod schemas, ensuring structured, validated tool calls.
-  - This balances robustness (less coordinate drift) with flexibility (still able to click arbitrary locations when needed via `act_instruction`).
-
 - **Single agent today, multi‑agent ready**
   - The current implementation runs a single Stagehand agent configured for general browser automation.
-  - The architecture (orchestrator + tools) is designed to support **multiple specialised agents** in the future—each with its own tools, prompts and caching strategy—similar to Strawberry’s “companions”.
+  - The `StagehandAgentManager` abstraction purposely keeps the surface area small so we can spin up specialised agents (different prompts, models, or integrations) in the future without rewriting the IPC or UI layers.
 
 - **Explored local LLMs via transformers.js**
   - There was an attempt to run a fully local LLM using `transformers.js`, but ONNX Runtime kept crashing in Electron’s main process on macOS.

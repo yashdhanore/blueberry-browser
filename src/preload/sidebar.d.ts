@@ -16,6 +16,13 @@ interface ChatResponse {
   isComplete: boolean;
 }
 
+interface AgentMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+}
+
 interface TabInfo {
   id: string;
   title: string;
@@ -24,32 +31,16 @@ interface TabInfo {
 }
 
 interface AgentUpdate {
-  type:
-    | "start"
-    | "turn"
-    | "action"
-    | "actionComplete"
-    | "reasoning"
-    | "complete"
-    | "error"
-    | "cancelled";
+  type: "start" | "complete" | "error" | "cancelled" | "screenshot" | "history";
   data: any;
 }
 
 interface AgentState {
   isRunning: boolean;
-  isPaused: boolean;
   goal: string | null;
-  currentTurn: number;
-  maxTurns: number;
-  actions: Array<{
-    id: string;
-    type: string;
-    args: any;
-    status: "pending" | "completed" | "failed";
-    timestamp: number;
-  }>;
-  error: string | null;
+  history: AgentMessage[];
+  startedAt: number | null;
+  completedAt: number | null;
 }
 
 interface SidebarAPI {
