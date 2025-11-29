@@ -23,11 +23,22 @@ interface TabInfo {
   isActive: boolean;
 }
 
+interface AgentMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+}
+
 interface SidebarAPI {
   // Chat functionality
   sendChatMessage: (request: ChatRequest) => Promise<void>;
   onChatResponse: (callback: (data: ChatResponse) => void) => void;
   removeChatResponseListener: () => void;
+  clearChat: () => Promise<void>;
+  getMessages: () => Promise<any[]>;
+  onMessagesUpdated: (callback: (messages: any[]) => void) => void;
+  removeMessagesUpdatedListener: () => void;
 
   // Page content access
   getPageContent: () => Promise<string | null>;
@@ -36,6 +47,15 @@ interface SidebarAPI {
 
   // Tab information
   getActiveTabInfo: () => Promise<TabInfo | null>;
+
+  // Agent functionality
+  runAgentTask: (
+    instruction: string
+  ) => Promise<{ success: boolean; message?: string; error?: string }>;
+  clearAgentHistory: () => Promise<void>;
+  getAgentMessages: () => Promise<AgentMessage[]>;
+  onAgentMessages: (callback: (messages: AgentMessage[]) => void) => void;
+  removeAgentMessagesListener: () => void;
 }
 
 declare global {
@@ -44,4 +64,3 @@ declare global {
     sidebarAPI: SidebarAPI;
   }
 }
-

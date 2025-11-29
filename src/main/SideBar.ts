@@ -2,11 +2,15 @@ import { is } from "@electron-toolkit/utils";
 import { BaseWindow, WebContentsView } from "electron";
 import { join } from "path";
 import { LLMClient } from "./LLMClient";
+import { StagehandAgentManager } from "./agent/StagehandAgentManager";
+import type { Window } from "./Window";
 
 export class SideBar {
   private webContentsView: WebContentsView;
   private baseWindow: BaseWindow;
   private llmClient: LLMClient;
+  private agentManager: StagehandAgentManager | null = null;
+  private window: Window | null = null;
   private isVisible: boolean = true;
 
   constructor(baseWindow: BaseWindow) {
@@ -17,6 +21,16 @@ export class SideBar {
 
     // Initialize LLM client
     this.llmClient = new LLMClient(this.webContentsView.webContents);
+  }
+
+  // Set the window reference after construction to avoid circular dependencies
+  setWindow(window: Window): void {
+    this.window = window;
+    // Initialize agent manager with window reference
+    this.agentManager = new StagehandAgentManager(
+      this.webContentsView.webContents,
+      window
+    );
   }
 
   private createWebContentsView(): WebContentsView {
@@ -78,6 +92,10 @@ export class SideBar {
 
   get client(): LLMClient {
     return this.llmClient;
+  }
+
+  get agentManagerInstance(): StagehandAgentManager | null {
+    return this.agentManager;
   }
 
   show(): void {

@@ -19,7 +19,7 @@ Your job is to **clone this repo** and add a unique feature. Some ideas are list
 It doesn't need to work 100% reliably, or even be completely done. It just has to:
 
 - Show that you are creative and can iterate on novel ideas fast
-- Demonstrate good system thinking and code practices  
+- Demonstrate good system thinking and code practices
 - Prove you are a capable full stack and/or LLM dev
 
 Once you're done, we'll book a call where you'll get to present your work!
@@ -37,22 +37,26 @@ You are allowed to vibe code, but make sure you understand everything so we can 
 ## 💡 Feature Ideas
 
 ### **Browsing History Compiler**
+
 Track the things that the user is doing inside the browser and figure out from a series of browser states what the user is doing, and perhaps how valuable, repetitive tasks can be re-run by an AI agent.
 
-*Tab state series → Prompt for web agent how to reproduce the work*
+_Tab state series → Prompt for web agent how to reproduce the work_
 
 ### **Coding Agent**
+
 Sidebar coding agent that can create a script that can run on the open tabs.
 
 Maybe useful for filling forms or changing the page's style so it can extract data but present it in a nicer format.
 
 ### **Tab Completion Model**
+
 Predict next action or what to type, like Cursor's tab completion model.
 
 ### **Your Own Idea**
+
 Feel free to implement your own idea!
 
-> Wanted to try transformers.js for a while? This is your chance! 
+> Wanted to try transformers.js for a while? This is your chance!
 
 > Have an old cool web agent framework you built? Let's see if you can merge it into the browser!
 
@@ -71,15 +75,48 @@ It can also be a good way for us to give feedback if things are heading in the r
 ## 🚀 Project Setup
 
 ### Install
+
 ```bash
 $ pnpm install
 ```
 
 ### Development
+
 ```bash
 $ pnpm dev
 ```
 
 **Add an OpenAI API key to `.env`** in the root folder.
 
-Strawberry will reimburse LLM costs, so go crazy! *(Please not more than a few hundred dollars though!)*
+Strawberry will reimburse LLM costs, so go crazy! _(Please not more than a few hundred dollars though!)_
+
+### Stagehand Agent Setup
+
+Blueberry Browser includes a Stagehand-powered AI agent that can autonomously perform web tasks using Gemini Computer Use.
+
+**Required Environment Variables:**
+
+Add these to your `.env` file:
+
+```bash
+GOOGLE_API_KEY=your_google_api_key_here
+STAGEHAND_AGENT_MODEL=google/gemini-2.5-computer-use-preview-10-2025
+STAGEHAND_VERBOSE=1
+STAGEHAND_CDP_PORT=9222
+```
+
+**How to Use:**
+
+1. The browser automatically enables remote debugging on port 9222 (configurable via `STAGEHAND_CDP_PORT`)
+2. Open the sidebar chat (⌘E) and toggle the "Agent" mode button
+3. Type your task instruction (e.g., "Fill out this form" or "Search for flights")
+4. The agent will execute the task autonomously using computer vision and browser automation
+
+**How It Works:**
+
+- Stagehand connects to the Electron browser via Chrome DevTools Protocol (CDP)
+- Uses Gemini 2.5 Computer Use model for visual understanding and action execution
+- Automatically highlights cursor movements and actions for visibility
+- Tasks run with up to 30 steps by default
+
+For more details, see [Stagehand Documentation](https://docs.stagehand.dev/v3/first-steps/introduction).

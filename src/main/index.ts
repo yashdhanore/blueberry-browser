@@ -1,12 +1,21 @@
 import { app, BrowserWindow } from "electron";
 import { electronApp } from "@electron-toolkit/utils";
+import * as dotenv from "dotenv";
+import { join } from "path";
 import { Window } from "./Window";
 import { AppMenu } from "./Menu";
 import { EventManager } from "./EventManager";
 
+// Load environment variables
+dotenv.config({ path: join(__dirname, "../.env") });
+
 let mainWindow: Window | null = null;
 let eventManager: EventManager | null = null;
 let menu: AppMenu | null = null;
+
+// Enable remote debugging for Stagehand CDP connection
+const cdpPort = process.env.STAGEHAND_CDP_PORT || "9222";
+app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
 
 const createWindow = (): Window => {
   const window = new Window();
@@ -29,14 +38,18 @@ app.whenReady().then(() => {
   });
 });
 
-app.on("window-all-closed", () => {
+app.on("window-all-closed", async () => {
   if (eventManager) {
     eventManager.cleanup();
     eventManager = null;
   }
 
-  // Clean up references
+  // Clean up agent manager
   if (mainWindow) {
+    const agentManager = mainWindow.sidebar.agentManagerInstance;
+    if (agentManager) {
+      await agentManager.cleanup();
+    }
     mainWindow = null;
   }
   if (menu) {

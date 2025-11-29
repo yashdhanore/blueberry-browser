@@ -12,10 +12,10 @@ export class Window {
   private _sideBar: SideBar;
 
   constructor() {
-    // Create the browser window.
+    // Create the browser window with Stagehand-recommended viewport size (1280x720)
     this._baseWindow = new BaseWindow({
-      width: 1000,
-      height: 800,
+      width: 1280,
+      height: 720,
       show: true,
       autoHideMenuBar: false,
       titleBarStyle: "hidden",
@@ -23,13 +23,15 @@ export class Window {
       trafficLightPosition: { x: 15, y: 13 },
     });
 
-    this._baseWindow.setMinimumSize(1000, 800);
+    // Set minimum size to Stagehand's recommended viewport
+    this._baseWindow.setMinimumSize(1280, 720);
 
     this._topBar = new TopBar(this._baseWindow);
     this._sideBar = new SideBar(this._baseWindow);
 
-    // Set the window reference on the LLM client to avoid circular dependency
+    // Set the window reference on the LLM client and agent manager to avoid circular dependency
     this._sideBar.client.setWindow(this);
+    this._sideBar.setWindow(this);
 
     // Create the first tab
     this.createTab();

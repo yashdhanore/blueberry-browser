@@ -52,6 +52,26 @@ const sidebarAPI = {
 
   // Tab information
   getActiveTabInfo: () => electronAPI.ipcRenderer.invoke("get-active-tab-info"),
+
+  // Agent functionality
+  runAgentTask: (instruction: string) =>
+    electronAPI.ipcRenderer.invoke("sidebar-agent-run", instruction),
+
+  clearAgentHistory: () =>
+    electronAPI.ipcRenderer.invoke("sidebar-agent-clear"),
+
+  getAgentMessages: () =>
+    electronAPI.ipcRenderer.invoke("sidebar-agent-get-messages"),
+
+  onAgentMessages: (callback: (messages: any[]) => void) => {
+    electronAPI.ipcRenderer.on("sidebar-agent-messages", (_, messages) =>
+      callback(messages)
+    );
+  },
+
+  removeAgentMessagesListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("sidebar-agent-messages");
+  },
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

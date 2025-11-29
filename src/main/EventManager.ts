@@ -16,6 +16,9 @@ export class EventManager {
     // Sidebar events
     this.handleSidebarEvents();
 
+    // Agent events
+    this.handleAgentEvents();
+
     // Page content events
     this.handlePageContentEvents();
 
@@ -172,6 +175,38 @@ export class EventManager {
     // Get messages
     ipcMain.handle("sidebar-get-messages", () => {
       return this.mainWindow.sidebar.client.getMessages();
+    });
+  }
+
+  private handleAgentEvents(): void {
+    // Run agent task
+    ipcMain.handle("sidebar-agent-run", async (_, instruction: string) => {
+      const agentManager = this.mainWindow.sidebar.agentManagerInstance;
+      if (!agentManager) {
+        return {
+          success: false,
+          error: "Agent manager not initialized",
+        };
+      }
+      return await agentManager.runTask(instruction);
+    });
+
+    // Clear agent history
+    ipcMain.handle("sidebar-agent-clear", () => {
+      const agentManager = this.mainWindow.sidebar.agentManagerInstance;
+      if (agentManager) {
+        agentManager.clearHistory();
+      }
+      return true;
+    });
+
+    // Get agent messages
+    ipcMain.handle("sidebar-agent-get-messages", () => {
+      const agentManager = this.mainWindow.sidebar.agentManagerInstance;
+      if (!agentManager) {
+        return [];
+      }
+      return agentManager.getHistory();
     });
   }
 
