@@ -45,18 +45,6 @@ export class Tab {
         void this.updateControlBanner();
       }
     });
-
-    this.webContentsView.webContents.on("before-input-event", (event) => {
-      if (this.shouldBlockUserInteraction()) {
-        event.preventDefault();
-      }
-    });
-
-    this.webContentsView.webContents.on("before-mouse-event", (event) => {
-      if (this.shouldBlockUserInteraction()) {
-        event.preventDefault();
-      }
-    });
   }
 
   get id(): string {
@@ -145,10 +133,6 @@ export class Tab {
 
   destroy(): void {
     this.webContentsView.webContents.close();
-  }
-
-  private shouldBlockUserInteraction(): boolean {
-    return this._isInteractionLocked;
   }
 
   private async updateControlBanner(): Promise<void> {

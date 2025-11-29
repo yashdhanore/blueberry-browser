@@ -87,10 +87,6 @@ export class StagehandAgentManager extends EventEmitter {
         verbose: verbose as 0 | 1 | 2,
         localBrowserLaunchOptions: {
           cdpUrl: cdpUrl,
-          viewport: {
-            width: 1280,
-            height: 720,
-          },
         },
       });
 
@@ -243,6 +239,21 @@ export class StagehandAgentManager extends EventEmitter {
     return null;
   }
 
+  private async waitForWorkspacePage(
+    targetUrl: string,
+    attempts: number = 10,
+    delayMs: number = 500
+  ): Promise<any> {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const page = await this.findCorrectPage(targetUrl);
+      if (page) {
+        return page;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return null;
+  }
+
   async runTask(instruction: string): Promise<AgentTaskResult> {
     if (this.isRunning) {
       return {
@@ -294,26 +305,27 @@ export class StagehandAgentManager extends EventEmitter {
         process.env.STAGEHAND_AGENT_MODEL ||
         "google/gemini-2.5-computer-use-preview-10-2025";
 
-      // Get the active tab's page
       const activeTab = this.window?.activeTab;
       if (!activeTab) {
         throw new Error("No active tab found");
       }
 
-      const currentUrl = activeTab.url;
+      const targetUrl =
+        activeTab.url && activeTab.url !== "about:blank"
+          ? activeTab.url
+          : "https://www.google.com/";
       const verbose = parseInt(process.env.STAGEHAND_VERBOSE || "1", 10);
 
       if (verbose >= 1) {
         console.log(
-          `[Stagehand] Looking for page matching active tab URL: ${currentUrl}`
+          `[Stagehand] Looking for page matching active tab URL: ${targetUrl}`
         );
       }
 
       // Find the correct page that matches the active tab
       // This filters out sidebar/topbar pages
-      let page = await this.findCorrectPage(currentUrl);
+      let page = await this.findCorrectPage(targetUrl);
 
-      // If no suitable page found, create a new one
       if (!page) {
         if (verbose >= 1) {
           console.log("[Stagehand] Creating new page for agent task");
@@ -330,33 +342,22 @@ export class StagehandAgentManager extends EventEmitter {
         }
       }
 
-      // Navigate to current tab URL if needed
       if (
-        currentUrl &&
-        currentUrl !== "about:blank" &&
-        currentUrl !== page.url()
+        targetUrl &&
+        targetUrl !== "about:blank" &&
+        targetUrl !== page.url()
       ) {
-        if (verbose >= 1) {
-          console.log(
-            `[Stagehand] Navigating page from ${page.url()} to ${currentUrl}`
-          );
-        }
         try {
-          await page.goto(currentUrl, {
+          await page.goto(targetUrl, {
             waitUntil: "domcontentloaded",
           });
-          if (verbose >= 1) {
-            console.log(`[Stagehand] Successfully navigated to ${currentUrl}`);
-          }
         } catch (error) {
           console.warn(
             "[Stagehand] Failed to navigate Stagehand page to current URL:",
             error
           );
-          // Continue anyway - the agent can work with whatever page is open
+          // Continue anyway
         }
-      } else if (verbose >= 1) {
-        console.log(`[Stagehand] Page already at target URL: ${page.url()}`);
       }
 
       // Create agent with computer use capabilities
@@ -386,13 +387,11 @@ Do not ask follow up questions, the user will trust your judgement. If you are g
         page: page, // Explicitly specify the page to use
       });
 
-      if (verbose >= 1) {
-        console.log(
-          `[Stagehand] Agent task completed: ${result.success ? "SUCCESS" : "FAILED"}`
-        );
-        if (result.message) {
-          console.log(`[Stagehand] Result message: ${result.message}`);
-        }
+      console.log(
+        `[Stagehand] Agent task completed: ${result.success ? "SUCCESS" : "FAILED"}`
+      );
+      if (result.message) {
+        console.log(`[Stagehand] Result message: ${result.message}`);
       }
 
       const assistantMessage: AgentMessage = {
@@ -515,15 +514,6 @@ Do not ask follow up questions, the user will trust your judgement. If you are g
 
     this.cancelRequested = true;
     this.isRunning = false;
-
-    try {
-      await this.stagehand?.close({ force: true });
-    } catch (error) {
-      console.warn("Failed to close Stagehand session during cancel:", error);
-    } finally {
-      this.stagehand = null;
-      this.isInitialized = false;
-    }
 
     this.completedAt = Date.now();
     const duration =
