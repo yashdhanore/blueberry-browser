@@ -18,15 +18,7 @@ interface ChatResponse {
 }
 
 interface AgentUpdate {
-  type:
-    | "start"
-    | "turn"
-    | "action"
-    | "actionComplete"
-    | "reasoning"
-    | "complete"
-    | "error"
-    | "cancelled";
+  type: "start" | "complete" | "error" | "cancelled" | "screenshot" | "history";
   data: any;
 }
 

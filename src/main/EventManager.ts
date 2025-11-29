@@ -1,16 +1,13 @@
 import { ipcMain, WebContents } from "electron";
 import type { Window } from "./Window";
-import { ComputerUseActions } from "./agent/ComputerUseActions";
 import { AgentService } from "./agent/AgentService";
 
 export class EventManager {
   private mainWindow: Window;
-  private computerUseActions: ComputerUseActions;
   private agentService: AgentService;
 
   constructor(mainWindow: Window) {
     this.mainWindow = mainWindow;
-    this.computerUseActions = new ComputerUseActions(this.mainWindow);
     this.agentService = AgentService.getInstance();
     this.agentService.setWindow(this.mainWindow);
     this.setupEventHandlers();
@@ -23,7 +20,6 @@ export class EventManager {
     this.handleDarkModeEvents();
     this.handleDebugEvents();
     this.handleAgentEvents();
-    this.handleStagehandHelperEvents();
   }
 
   private handleTabEvents(): void {
@@ -173,43 +169,6 @@ export class EventManager {
           console.warn("Failed to fetch smart suggestions:", error);
           return [];
         }
-      }
-    );
-  }
-
-  /**
-   * IPC handlers exposing high-level Stagehand helpers (act/extract/observe)
-   * against the active tab.
-   */
-  private handleStagehandHelperEvents(): void {
-    ipcMain.handle(
-      "stagehand-extract",
-      async (_, instruction: string, options?: Record<string, any>) => {
-        return await this.computerUseActions.extractOnActivePage(
-          instruction,
-          undefined,
-          options
-        );
-      }
-    );
-
-    ipcMain.handle(
-      "stagehand-observe",
-      async (_, instruction?: string, options?: Record<string, any>) => {
-        return await this.computerUseActions.observeOnActivePage(
-          instruction,
-          options
-        );
-      }
-    );
-
-    ipcMain.handle(
-      "stagehand-act",
-      async (_, instruction: string, options?: Record<string, any>) => {
-        return await this.computerUseActions.actOnActivePage(
-          instruction,
-          options
-        );
       }
     );
   }
