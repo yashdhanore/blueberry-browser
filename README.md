@@ -37,7 +37,6 @@ The implementation is designed to be:
 - **`StagehandAgentManager` (main process, `src/main/agent/StagehandAgentManager.ts`)**
   - Wraps the @browserbasehq/stagehand SDK directly and is responsible for CDP discovery, matching the active Electron tab to a Stagehand page, launching the CU agent, and streaming results.
   - Emits lifecycle events (`start`, `screenshot`, `complete`, `error`, `cancelled`, `history`) and exposes helpers such as `runTask`, `cancelCurrentTask`, `getState`, and `cleanup`.
-  - Closely mirrors the Stagehand documentation so we automatically benefit from upstream improvements—no custom locator or observe/act wrappers needed.
 
 - **`AgentService` (main process, `src/main/agent/AgentService.ts`)**
   - Owns the singleton `StagehandAgentManager`, ensures the main window is wired in, and forwards lifecycle events to the sidebar via `agent-update` IPC messages.

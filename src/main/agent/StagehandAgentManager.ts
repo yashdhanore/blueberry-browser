@@ -125,29 +125,6 @@ export class StagehandAgentManager extends EventEmitter {
   }
 
   /**
-   * Inspect CDP targets to understand available pages
-   * Useful for debugging - can be called to see all available CDP targets
-   */
-  private async inspectCdpTargets(): Promise<any[]> {
-    try {
-      const response = await fetch(
-        `http://127.0.0.1:${this.cdpPort}/json/list`
-      );
-      if (!response.ok) {
-        return [];
-      }
-      const targets = await response.json();
-      return targets || [];
-    } catch (error) {
-      console.warn("Failed to inspect CDP targets:", error);
-      return [];
-    }
-  }
-
-  // Note: inspectCdpTargets() is available for debugging but not currently used
-  // It can be called to inspect available CDP targets if needed
-
-  /**
    * Check if a URL is a local UI URL (topbar, sidebar, etc.)
    */
   private isLocalUIUrl(url: string): boolean {
@@ -235,21 +212,6 @@ export class StagehandAgentManager extends EventEmitter {
     // If no suitable page found, return null to create a new one
     if (verbose >= 1) {
       console.log("[Stagehand] No suitable page found, will create a new page");
-    }
-    return null;
-  }
-
-  private async waitForWorkspacePage(
-    targetUrl: string,
-    attempts: number = 10,
-    delayMs: number = 500
-  ): Promise<any> {
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      const page = await this.findCorrectPage(targetUrl);
-      if (page) {
-        return page;
-      }
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     return null;
   }
@@ -360,7 +322,6 @@ export class StagehandAgentManager extends EventEmitter {
         }
       }
 
-      // Create agent with computer use capabilities
       const agent = this.stagehand.agent({
         cua: true,
         model: {
